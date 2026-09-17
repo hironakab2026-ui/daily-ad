@@ -35,6 +35,11 @@ async function ensureDeviceUser(req, res, next) {
           [userId, kind, name, sortOrder]
         );
       }
+      // スケジュール管理アプリ（APP-4）用：予定は必ず1つのカレンダーに属するため、既定のものを1つ用意する
+      await conn.query(
+        'INSERT INTO schedule_calendars (user_id, name, color, sort_order) VALUES (?, ?, ?, ?)',
+        [userId, '個人', '#4c56d6', 1]
+      );
       await conn.commit();
 
       res.cookie(DEVICE_COOKIE, String(userId), {

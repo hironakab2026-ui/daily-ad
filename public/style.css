@@ -455,3 +455,123 @@ input[type="text"], input[type="email"], input[type="password"], input[type="dat
   cursor: pointer;
 }
 .task-def-row:last-child { border-bottom: none; }
+
+/* ---------- スケジュール管理アプリ（APP-4） ---------- */
+.sched-toolbar { margin-bottom: 10px; }
+.sched-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.sched-nav .sched-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sched-nav .btn-labeled { flex-shrink: 0; padding: 6px 10px; }
+
+/* 棒状（day-bar）：予定名などの詳細を一切含まない視覚専用サマリー */
+.day-bar { display: block; border-radius: 999px; }
+
+/* 時間軸グリッド（週表示・日表示 共通） */
+.grid-headrow, .grid-allday-row {
+  display: grid;
+  align-items: center;
+}
+.grid-head-cell {
+  text-align: center;
+  padding: 4px 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+.grid-head-cell .ghc-w { font-size: 10px; color: var(--muted); }
+.grid-head-cell .ghc-d { font-size: 14px; font-weight: 700; }
+.grid-head-cell.today .ghc-d {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--primary); color: #fff;
+}
+.grid-allday-row { padding: 4px 0; border-bottom: 1px solid var(--border); }
+.grid-allday-label { font-size: 9px; color: var(--muted); text-align: right; padding-right: 4px; }
+.grid-allday-cell { display: flex; flex-direction: column; gap: 2px; padding: 0 2px; min-height: 8px; }
+.allday-chip {
+  font-size: 10.5px;
+  padding: 2px 5px;
+  border-radius: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.grid-scroll {
+  max-height: 460px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--border);
+}
+.grid-body { display: grid; position: relative; }
+.grid-hourlabels { position: relative; }
+.hour-label {
+  position: absolute;
+  right: 4px;
+  left: 0;
+  text-align: right;
+  font-size: 9px;
+  color: var(--muted);
+  transform: translateY(-6px);
+}
+.grid-daycol {
+  position: relative;
+  border-left: 1px solid var(--border);
+  background-image: repeating-linear-gradient(to bottom, var(--border) 0, var(--border) 1px, transparent 1px, transparent 100%);
+  background-repeat: repeat-y;
+}
+.now-line {
+  position: absolute;
+  left: 0; right: 0;
+  height: 0;
+  border-top: 2px solid var(--expense);
+  z-index: 5;
+}
+.event-block {
+  position: absolute;
+  border-radius: 6px;
+  padding: 2px 5px;
+  overflow: hidden;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.25;
+}
+.event-block-time { font-size: 9px; color: var(--muted); }
+.event-block-title { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 月表示（棒状サマリーのみ。予定名は出さない） */
+.sched-month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 3px;
+}
+.sm-head { font-size: 10px; color: var(--muted); text-align: center; padding-bottom: 4px; }
+.sm-cell {
+  position: relative;
+  min-height: 52px;
+  border-radius: 8px;
+  padding: 4px 5px;
+  cursor: pointer;
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+.sm-cell.empty { visibility: hidden; }
+.sm-cell.today { border-color: var(--primary); }
+.sm-daynum { font-size: 11px; margin-bottom: 6px; }
+.sm-cell.today .sm-daynum { color: var(--primary); font-weight: 700; }
+.sm-allday-dot {
+  position: absolute; top: 5px; right: 5px;
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--accent);
+}

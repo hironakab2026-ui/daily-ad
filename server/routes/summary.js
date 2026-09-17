@@ -68,6 +68,18 @@ router.get('/today', async (req, res, next) => {
       [req.userId, date]
     );
 
+    // スケジュール管理アプリ（APP-4）は本リポジトリに同梱のアドオンのため、
+    // 連携ON/OFFを問わず content_summary_cache（content_key='schedule'）を直接読む。
+    // ここで返すのは棒状の時間帯（bars）と件数のみ。予定名などの詳細は渡さない（CLAUDE.md 4.1）。
+    const [[scheduleRow]] = await pool.query(
+      `SELECT status, badge, metrics FROM content_summary_cache
+       WHERE user_id = ? AND content_key = 'schedule' AND target_date = ?`,
+      [req.userId, date]
+    );
+    const schedule = scheduleRow
+      ? { status: scheduleRow.status, badge: scheduleRow.badge, metrics: typeof scheduleRow.metrics === 'string' ? JSON.parse(scheduleRow.metrics) : scheduleRow.metrics }
+      : { status: 'none', badge: null, metrics: null };
+
     res.json({
       date,
       income,
@@ -76,6 +88,7 @@ router.get('/today', async (req, res, next) => {
       task_planned: Number(task.planned),
       task_done: Number(task.done),
       task_rate: task.planned > 0 ? Math.round((task.done / task.planned) * 1000) / 10 : null,
+      schedule,
     });
   } catch (err) {
     next(err);
