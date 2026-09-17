@@ -112,4 +112,44 @@ router.get('/month', async (req, res, next) => {
   }
 });
 
+// GET /api/summary/trend?months=6  -- サマリー画面の月別比較（収支の推移・タスク達成率の推移）
+router.get('/trend', async (req, res, next) => {
+  try {
+    const months = Math.min(Math.max(Number(req.query.months) || 6, 2), 12);
+    const now = new Date();
+    const targets = [];
+    for (let i = months - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      targets.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+
+    const [balanceRows] = await pool.query(
+      `SELECT DATE_FORMAT(entry_date, '%Y-%m') AS month,
+              SUM(CASE WHEN kind = 'income' THEN amount ELSE -amount END) AS net
+       FROM transactions
+       WHERE user_id = ? AND deleted_at IS NULL
+         AND entry_date BETWEEN ? AND LAST_DAY(?)
+       GROUP BY month`,
+      [req.userId, `${targets[0]}-01`, `${targets[targets.length - 1]}-01`]
+    );
+    const [taskRows] = await pool.query(
+      `SELECT DATE_FORMAT(target_date, '%Y-%m') AS month, ROUND(AVG(rate), 1) AS avg_rate
+       FROM v_daily_task
+       WHERE user_id = ? AND target_date BETWEEN ? AND LAST_DAY(?)
+       GROUP BY month`,
+      [req.userId, `${targets[0]}-01`, `${targets[targets.length - 1]}-01`]
+    );
+    const netByMonth = Object.fromEntries(balanceRows.map((r) => [r.month, Number(r.net)]));
+    const rateByMonth = Object.fromEntries(taskRows.map((r) => [r.month, r.avg_rate !== null ? Number(r.avg_rate) : null]));
+
+    res.json(targets.map((month) => ({
+      month,
+      net: netByMonth[month] ?? 0,
+      task_rate: rateByMonth[month] ?? null,
+    })));
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

@@ -13,17 +13,17 @@
     <h1 id="topbar-title">今日</h1>
   </header>
   <main id="view"></main>
-  <button class="fab" id="fab-add" title="収支を入力">＋</button>
   <nav class="tabbar">
-    <button data-tab="today" class="active"><span class="icon">🏠</span>今日</button>
-    <button data-tab="tasks"><span class="icon">✅</span>タスク</button>
-    <button data-tab="calendar"><span class="icon">📅</span>カレンダー</button>
-    <button data-tab="records"><span class="icon">📋</span>記録</button>
-    <button data-tab="settings"><span class="icon">⚙️</span>設定</button>
+    <button data-tab="today" class="active"><span data-icon="home"></span>今日</button>
+    <button data-tab="tasks"><span data-icon="tasks"></span>タスク</button>
+    <button data-tab="summary"><span data-icon="summary"></span>サマリー</button>
+    <button data-tab="records"><span data-icon="records"></span>記録</button>
+    <button data-tab="settings"><span data-icon="settings"></span>設定</button>
   </nav>
 </div>
 <div id="modal-root"></div>
 <div id="toast" class="toast"></div>
+<script src="icons.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

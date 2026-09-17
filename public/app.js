@@ -4,14 +4,18 @@
 
 const WEEKDAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
 const WEEKDAY_LABEL = { SU: '日', MO: '月', TU: '火', WE: '水', TH: '木', FR: '金', SA: '土' };
+const TASK_COLORS = ['#4c56d6', '#0f9d69', '#dc4a5e', '#f2a93b', '#8b5cf6', '#06b6d4', '#f97316', '#64748b'];
+const CATEGORY_COLORS = ['#4c56d6', '#0f9d69', '#f2a93b', '#dc4a5e', '#8b5cf6', '#06b6d4', '#f97316', '#64748b', '#22c55e', '#eab308'];
+
+const todayFixed = todayStr();
 
 const state = {
   tab: 'today',
-  todayDate: todayStr(),
-  taskSubTab: 'today', // 'today' | 'defs'
-  calMonth: todayStr().slice(0, 7),
-  calView: 'calendar', // 'calendar' | 'monthly'
-  recordsMonth: todayStr().slice(0, 7),
+  homeMonth: todayFixed.slice(0, 7),
+  summaryMonth: todayFixed.slice(0, 7),
+  recordsMonth: todayFixed.slice(0, 7),
+  txOpen: false,
+  taskOpen: true,
   categories: [],
   user: null,
 };
@@ -31,6 +35,17 @@ function fmtDateLabel(dateStr) {
   const dt = new Date(y, m - 1, d);
   const w = ['日', '月', '火', '水', '木', '金', '土'][dt.getDay()];
   return `${m}月${d}日(${w})`;
+}
+
+function monthLabel(month) {
+  const [y, m] = month.split('-').map(Number);
+  return `${y}年${m}月`;
+}
+
+function shiftMonth(month, delta) {
+  const [y, m] = month.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
 async function api(path, options = {}) {
@@ -71,6 +86,7 @@ function openModal(html) {
   document.getElementById('modal-backdrop').addEventListener('click', (e) => {
     if (e.target.id === 'modal-backdrop') closeModal();
   });
+  fillIcons(document.getElementById('modal-root'));
 }
 
 async function ensureCategories() {
@@ -80,10 +96,23 @@ async function ensureCategories() {
   return state.categories;
 }
 
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function fillIcons(root) {
+  (root || document).querySelectorAll('[data-icon]').forEach((el) => {
+    if (!el.dataset.filled) {
+      el.innerHTML = icon(el.dataset.icon, el.dataset.iconSize ? Number(el.dataset.iconSize) : 20);
+      el.dataset.filled = '1';
+    }
+  });
+}
+
 // ------------------------------------------------------------
 // ルーティング / タブ
 // ------------------------------------------------------------
-const TAB_TITLES = { today: '今日', tasks: 'タスク', calendar: 'カレンダー', records: '記録', settings: '設定' };
+const TAB_TITLES = { today: '今日', tasks: 'タスク', summary: 'サマリー', records: '記録', settings: '設定' };
 
 function setTab(tab) {
   state.tab = tab;
@@ -91,7 +120,6 @@ function setTab(tab) {
     b.classList.toggle('active', b.dataset.tab === tab);
   });
   document.getElementById('topbar-title').textContent = TAB_TITLES[tab];
-  document.getElementById('fab-add').style.display = tab === 'today' ? 'block' : 'none';
   render();
 }
 
@@ -99,66 +127,165 @@ async function render() {
   const view = document.getElementById('view');
   view.innerHTML = '<div class="empty">読み込み中…</div>';
   try {
-    if (state.tab === 'today') return renderToday(view);
-    if (state.tab === 'tasks') return renderTasks(view);
-    if (state.tab === 'calendar') return renderCalendar(view);
-    if (state.tab === 'records') return renderRecords(view);
-    if (state.tab === 'settings') return renderSettings(view);
+    if (state.tab === 'today') await renderToday(view);
+    else if (state.tab === 'tasks') await renderTasks(view);
+    else if (state.tab === 'summary') await renderSummary(view);
+    else if (state.tab === 'records') await renderRecords(view);
+    else if (state.tab === 'settings') await renderSettings(view);
+    fillIcons(view);
   } catch (err) {
     view.innerHTML = `<div class="empty">エラー: ${escapeHtml(err.message)}</div>`;
   }
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
 // ============================================================
-// A1-01 当日サマリー
+// A1-01 今日（ホーム）：カレンダー＋収支/ゲージ＋タスク＋収支明細
 // ============================================================
 async function renderToday(view) {
-  const date = state.todayDate;
-  const [summary, txs] = await Promise.all([
+  const date = todayFixed;
+  const [summary, txs, tasks, calCells] = await Promise.all([
     api(`/summary/today?date=${date}`),
     api(`/transactions?date=${date}`),
+    api(`/tasks/today?date=${date}`),
+    api(`/calendar?month=${state.homeMonth}`),
   ]);
 
-  const netClass = summary.net >= 0 ? 'positive' : 'negative';
-  const rate = summary.task_rate;
-  const rateLabel = rate === null ? '予定なし' : `${rate}%`;
-  const ratePct = rate === null ? 0 : rate;
-
   view.innerHTML = `
-    <div class="card">
-      <div class="field" style="margin-bottom:10px;">
-        <input type="date" id="today-date" value="${date}">
-      </div>
-      <h2>${escapeHtml(fmtDateLabel(date))}の収支</h2>
-      <div class="balance-row">
-        <div class="balance-item"><div class="label">収入</div><div class="value income">${fmtYen(summary.income)}</div></div>
-        <div class="balance-item"><div class="label">支出</div><div class="value expense">${fmtYen(summary.expense)}</div></div>
-        <div class="balance-item"><div class="label">収支</div><div class="value net ${netClass}">${fmtYen(summary.net)}</div></div>
+    <div class="home-top">
+      <div class="card" id="mini-cal-card">${miniCalendarHtml(state.homeMonth, calCells)}</div>
+      <div class="card today-panel">
+        <div class="date-label">${escapeHtml(fmtDateLabel(date))}</div>
+        <div class="stat-line"><span>収入</span><span class="stat-val income">${fmtYen(summary.income)}</span></div>
+        <div class="stat-line"><span>支出</span><span class="stat-val expense">${fmtYen(summary.expense)}</span></div>
+        <div class="stat-line net"><span>収支</span><span class="stat-val ${summary.net >= 0 ? 'positive' : 'negative'}">${fmtYen(summary.net)}</span></div>
+        <div class="gauge-wrap">${gaugeHtml(summary.task_done, summary.task_planned)}</div>
       </div>
     </div>
+
     <div class="card">
-      <h2>今日のタスク完遂率</h2>
-      <div class="progress-wrap">
-        <div class="progress-bar"><div style="width:${ratePct}%"></div></div>
-        <div>${rateLabel}</div>
+      <div class="card-header">
+        <h2>今日のタスク</h2>
+        <button class="btn-labeled" id="add-task-btn"><span data-icon="plus"></span>タスク</button>
       </div>
-      <div style="font-size:12px;color:var(--muted);margin-top:6px;">${summary.task_done}/${summary.task_planned} 件完了</div>
+      <div id="home-task-list">
+        ${tasks.length ? tasks.map(taskRowHtml).join('') : '<div class="empty">この日の予定タスクはありません</div>'}
+      </div>
     </div>
+
     <div class="card">
-      <h2>今日の記録</h2>
-      <div id="today-tx-list">${renderTxList(txs)}</div>
+      <div class="accordion-header ${state.txOpen ? 'open' : ''}" id="tx-accordion-header">
+        <div class="left"><h2 style="margin:0;">収支明細（${txs.length}件）</h2></div>
+        <span class="chev" data-icon="chevronDown" data-icon-size="16"></span>
+      </div>
+      <div class="accordion-body ${state.txOpen ? 'open' : ''}" id="tx-accordion-body">
+        <div style="height:8px;"></div>
+        ${renderTxList(txs)}
+        <div style="height:10px;"></div>
+        <button class="btn-labeled" id="add-tx-btn"><span data-icon="plus"></span>収支</button>
+      </div>
     </div>
   `;
 
-  document.getElementById('today-date').addEventListener('change', (e) => {
-    state.todayDate = e.target.value;
-    render();
+  // ミニカレンダー月送り
+  document.getElementById('mini-cal-card').querySelectorAll('[data-month-shift]').forEach((btn) => {
+    btn.addEventListener('click', () => { state.homeMonth = shiftMonth(state.homeMonth, Number(btn.dataset.monthShift)); renderToday(view); });
   });
-  bindTxDelete(view, () => render());
+  document.getElementById('mini-cal-card').querySelectorAll('[data-date]').forEach((el) => {
+    el.addEventListener('click', () => openDayDetailModal(el.dataset.date));
+  });
+
+  // タスクのチェック／編集
+  document.getElementById('home-task-list').querySelectorAll('[data-toggle-log]').forEach((el) => {
+    el.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await api(`/tasks/logs/${el.dataset.toggleLog}/toggle`, { method: 'POST' });
+      renderToday(view);
+    });
+  });
+  document.getElementById('home-task-list').querySelectorAll('[data-open-def]').forEach((row) => {
+    row.addEventListener('click', async () => {
+      const defs = await api('/tasks/definitions?all=1');
+      const def = defs.find((d) => d.id === Number(row.dataset.openDef));
+      if (def) openTaskDefModal(def, () => renderToday(view));
+    });
+  });
+  document.getElementById('add-task-btn').addEventListener('click', () => openTaskDefModal(null, () => renderToday(view)));
+  document.getElementById('add-tx-btn').addEventListener('click', () => openTransactionModal(date, () => renderToday(view)));
+
+  // 収支明細アコーディオン
+  document.getElementById('tx-accordion-header').addEventListener('click', () => {
+    state.txOpen = !state.txOpen;
+    document.getElementById('tx-accordion-header').classList.toggle('open', state.txOpen);
+    document.getElementById('tx-accordion-body').classList.toggle('open', state.txOpen);
+  });
+  bindTxDelete(view, () => renderToday(view));
+}
+
+function miniCalendarHtml(month, cells) {
+  const byDate = {};
+  cells.forEach((c) => { byDate[c.target_date] = c; });
+  const [y, m] = month.split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const startWeekday = new Date(y, m - 1, 1).getDay();
+
+  let cellsHtml = '';
+  ['日', '月', '火', '水', '木', '金', '土'].forEach((w) => { cellsHtml += `<div class="mc-head">${w}</div>`; });
+  for (let i = 0; i < startWeekday; i++) cellsHtml += '<div class="mc-cell empty"></div>';
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const c = byDate[dateStr];
+    const net = c && c.net !== null && c.net !== undefined ? Number(c.net) : null;
+    const isToday = dateStr === todayFixed;
+    cellsHtml += `
+      <div class="mc-cell ${isToday ? 'today' : ''}" data-date="${dateStr}">
+        ${day}
+        ${net !== null ? `<span class="mc-dot ${net >= 0 ? 'positive' : 'negative'}"></span>` : ''}
+      </div>`;
+  }
+  return `
+    <div class="mini-cal-head">
+      <button data-month-shift="-1">${icon('chevronLeft', 16)}</button>
+      <div class="month-label">${monthLabel(month)}</div>
+      <button data-month-shift="1">${icon('chevronRight', 16)}</button>
+    </div>
+    <div class="mini-cal-grid">${cellsHtml}</div>
+  `;
+}
+
+function gaugeHtml(done, planned) {
+  const pct = planned > 0 ? Math.round((done / planned) * 100) : 0;
+  const r = 34;
+  const c = 2 * Math.PI * r;
+  const offset = c * (1 - pct / 100);
+  return `
+    <div class="gauge-label" style="width:84px;height:84px;">
+      <svg width="84" height="84" viewBox="0 0 84 84">
+        <circle cx="42" cy="42" r="${r}" fill="none" stroke="var(--border)" stroke-width="9"/>
+        <circle cx="42" cy="42" r="${r}" fill="none" stroke="${planned > 0 ? 'var(--primary)' : 'var(--border)'}"
+          stroke-width="9" stroke-linecap="round"
+          stroke-dasharray="${c}" stroke-dashoffset="${offset}"/>
+      </svg>
+      <div class="gauge-center">
+        <div class="pct">${planned > 0 ? pct + '%' : '-'}</div>
+        <div class="frac">${done}/${planned}</div>
+      </div>
+    </div>
+  `;
+}
+
+function taskRowHtml(t) {
+  const time = t.remind_time ? t.remind_time.slice(0, 5) : '';
+  const color = t.color || '#c6cad6';
+  return `
+    <div class="task-row">
+      <div class="task-checkbox ${t.is_done ? 'done' : ''}" data-toggle-log="${t.id}">${t.is_done ? icon('check', 14) : ''}</div>
+      <span class="task-dot" style="background:${color}"></span>
+      <div class="task-row-info" data-open-def="${t.task_definition_id}">
+        <div class="task-row-name ${t.is_done ? 'done' : ''}">${escapeHtml(t.name)}</div>
+        <div class="task-row-meta">${time ? time + (t.memo ? ' ・ ' : '') : ''}${t.memo ? escapeHtml(t.memo) : ''}</div>
+      </div>
+    </div>
+  `;
 }
 
 function renderTxList(txs) {
@@ -168,14 +295,15 @@ function renderTxList(txs) {
       <span class="tx-cat">${escapeHtml(t.category)}</span>
       <span class="tx-memo">${escapeHtml(t.memo || '')}</span>
       <span class="tx-amount ${t.kind}">${t.kind === 'income' ? '+' : '-'}${fmtYen(t.amount)}</span>
-      <button class="tx-del" data-del-tx="${t.id}">✕</button>
+      <button class="icon-btn" data-del-tx="${t.id}" data-icon="x" data-icon-size="16"></button>
     </div>
   `).join('');
 }
 
 function bindTxDelete(root, onDone) {
   root.querySelectorAll('[data-del-tx]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
       if (!confirm('この記録を削除しますか？')) return;
       await api(`/transactions/${btn.dataset.delTx}`, { method: 'DELETE' });
       toast('削除しました');
@@ -184,16 +312,35 @@ function bindTxDelete(root, onDone) {
   });
 }
 
+async function openDayDetailModal(date) {
+  const detail = await api(`/calendar/day/${date}`);
+  openModal(`
+    <h2>${escapeHtml(fmtDateLabel(date))}の詳細</h2>
+    <h3 style="font-size:13px;color:var(--muted);">収支</h3>
+    <div id="detail-tx">${renderTxList(detail.transactions)}</div>
+    <h3 style="font-size:13px;color:var(--muted);margin-top:16px;">タスク</h3>
+    <div>${detail.tasks.length ? detail.tasks.map((t) => `
+      <div class="task-row">
+        <div class="task-checkbox ${t.is_done ? 'done' : ''}">${t.is_done ? icon('check', 14) : ''}</div>
+        <div class="task-row-info"><div class="task-row-name ${t.is_done ? 'done' : ''}">${escapeHtml(t.name)}</div></div>
+      </div>`).join('') : '<div class="empty">予定タスクなし</div>'}</div>
+    <div style="height:12px;"></div>
+    <button class="btn secondary" id="detail-add-tx">この日に収支を追加</button>
+  `);
+  bindTxDelete(document.getElementById('modal-root'), () => openDayDetailModal(date));
+  document.getElementById('detail-add-tx').addEventListener('click', () => openTransactionModal(date, () => { closeModal(); if (state.tab === 'today') render(); }));
+}
+
 // ============================================================
 // A1-02 収支入力（モーダル）
 // ============================================================
-async function openTransactionModal(defaultDate) {
+async function openTransactionModal(defaultDate, onSaved) {
   await ensureCategories();
   let kind = 'expense';
   let amount = '';
   let categoryId = null;
   let memo = '';
-  const date = defaultDate || state.todayDate;
+  const date = defaultDate || todayFixed;
 
   function catsFor(k) {
     return state.categories.filter((c) => c.kind === k && c.is_active);
@@ -202,7 +349,7 @@ async function openTransactionModal(defaultDate) {
   function draw() {
     const cats = catsFor(kind);
     openModal(`
-      <h2>収支入力</h2>
+      <h2>収支を追加</h2>
       <div class="segmented" id="kind-seg">
         <button data-kind="expense" class="${kind === 'expense' ? 'active' : ''}">支出</button>
         <button data-kind="income" class="${kind === 'income' ? 'active' : ''}">収入</button>
@@ -214,15 +361,15 @@ async function openTransactionModal(defaultDate) {
       <div class="cat-grid" id="cat-grid">
         ${cats.map((c) => `<div class="cat-chip ${c.id === categoryId ? 'selected' : ''}" data-cat="${c.id}">${escapeHtml(c.name)}</div>`).join('') || '<div class="empty">カテゴリがありません（設定から追加）</div>'}
       </div>
-      <div class="keypad-display" id="amount-display">${amount ? Number(amount).toLocaleString('ja-JP') : '0'}<span style="font-size:18px;">円</span></div>
+      <div class="keypad-display" id="amount-display">${amount ? Number(amount).toLocaleString('ja-JP') : '0'}<span style="font-size:16px;"> 円</span></div>
       <div class="field">
         <input type="text" id="tx-memo" placeholder="メモ（任意）" value="${escapeHtml(memo)}">
       </div>
       <div class="keypad" id="keypad">
-        ${['7','8','9','4','5','6','1','2','3','C','0','⌫'].map((k) => `<button data-key="${k}">${k}</button>`).join('')}
+        ${['7', '8', '9', '4', '5', '6', '1', '2', '3', 'C', '0', '⌫'].map((k) => `<button data-key="${k}">${k}</button>`).join('')}
       </div>
       <div style="height:12px;"></div>
-      <button class="btn" id="tx-save">保存</button>
+      <button class="btn" id="tx-save"><span data-icon="check" data-icon-size="16"></span>保存</button>
     `);
 
     document.querySelectorAll('#kind-seg button').forEach((b) => {
@@ -237,11 +384,10 @@ async function openTransactionModal(defaultDate) {
         if (k === 'C') amount = '';
         else if (k === '⌫') amount = amount.slice(0, -1);
         else if (amount.length < 9) amount = (amount + k).replace(/^0+(?=\d)/, '');
-        document.getElementById('amount-display').innerHTML = `${amount ? Number(amount).toLocaleString('ja-JP') : '0'}<span style="font-size:18px;">円</span>`;
+        document.getElementById('amount-display').innerHTML = `${amount ? Number(amount).toLocaleString('ja-JP') : '0'}<span style="font-size:16px;"> 円</span>`;
       });
     });
     document.getElementById('tx-memo').addEventListener('input', (e) => { memo = e.target.value; });
-    document.getElementById('tx-date').addEventListener('change', (e) => { /* date read on save */ });
 
     document.getElementById('tx-save').addEventListener('click', async () => {
       const entryDate = document.getElementById('tx-date').value;
@@ -254,8 +400,7 @@ async function openTransactionModal(defaultDate) {
       });
       toast('保存しました');
       closeModal();
-      state.todayDate = entryDate;
-      if (state.tab === 'today') render();
+      if (onSaved) onSaved();
     });
   }
 
@@ -263,87 +408,22 @@ async function openTransactionModal(defaultDate) {
 }
 
 // ============================================================
-// A1-03 / A1-04 タスク
+// A1-03/A1-04 タスク（一覧 → 詳細／編集 → 新規登録のみ）
 // ============================================================
 async function renderTasks(view) {
-  view.innerHTML = `
-    <div class="segmented" id="task-seg">
-      <button data-sub="today" class="${state.taskSubTab === 'today' ? 'active' : ''}">今日のタスク</button>
-      <button data-sub="defs" class="${state.taskSubTab === 'defs' ? 'active' : ''}">タスク管理</button>
-    </div>
-    <div id="task-body"></div>
-  `;
-  document.querySelectorAll('#task-seg button').forEach((b) => {
-    b.addEventListener('click', () => { state.taskSubTab = b.dataset.sub; renderTasks(view); });
-  });
-  const body = document.getElementById('task-body');
-  if (state.taskSubTab === 'today') await renderTodayTasks(body);
-  else await renderTaskDefs(body);
-}
-
-async function renderTodayTasks(body) {
-  const date = state.todayDate;
-  const tasks = await api(`/tasks/today?date=${date}`);
-  body.innerHTML = `
-    <div class="card">
-      <div class="field" style="margin-bottom:10px;">
-        <input type="date" id="task-date" value="${date}">
-      </div>
-      <h2>${escapeHtml(fmtDateLabel(date))}のタスク</h2>
-      <div id="task-list">
-        ${tasks.length ? tasks.map(taskItemHtml).join('') : '<div class="empty">この日の予定タスクはありません</div>'}
-      </div>
-    </div>
-  `;
-  document.getElementById('task-date').addEventListener('change', (e) => {
-    state.todayDate = e.target.value;
-    renderTasks(document.getElementById('view'));
-  });
-  body.querySelectorAll('[data-toggle-log]').forEach((el) => {
-    el.addEventListener('click', async () => {
-      await api(`/tasks/logs/${el.dataset.toggleLog}/toggle`, { method: 'POST' });
-      renderTodayTasks(body);
-    });
-  });
-}
-
-function taskItemHtml(t) {
-  const time = t.remind_time ? t.remind_time.slice(0, 5) : '';
-  return `
-    <div class="task-item">
-      <div class="task-check ${t.is_done ? 'done' : ''}" data-toggle-log="${t.id}">${t.is_done ? '✓' : ''}</div>
-      <div class="task-info">
-        <div class="task-name ${t.is_done ? 'done' : ''}">${escapeHtml(t.name)}</div>
-        <div class="task-meta">${time ? time + ' ' : ''}${t.memo ? escapeHtml(t.memo) : ''}</div>
-      </div>
-    </div>
-  `;
-}
-
-async function renderTaskDefs(body) {
   const defs = await api('/tasks/definitions');
-  body.innerHTML = `
+  view.innerHTML = `
     <div class="card">
-      <h2>タスク定義一覧</h2>
-      <div id="def-list">${defs.length ? defs.map(defItemHtml).join('') : '<div class="empty">タスクがありません</div>'}</div>
+      <div class="card-header"><h2>タスク一覧</h2></div>
+      <div id="def-list">${defs.length ? defs.map(defRowHtml).join('') : '<div class="empty">タスクがありません</div>'}</div>
     </div>
-    <button class="btn" id="new-task-btn">＋ 新しいタスクを追加</button>
+    <button class="btn" id="new-task-btn"><span data-icon="plus" data-icon-size="16"></span>新しいタスクを追加</button>
   `;
-  document.getElementById('new-task-btn').addEventListener('click', () => openTaskDefModal(null, () => renderTaskDefs(body)));
-  body.querySelectorAll('[data-edit-def]').forEach((btn) => {
-    const def = defs.find((d) => d.id === Number(btn.dataset.editDef));
-    btn.addEventListener('click', () => openTaskDefModal(def, () => renderTaskDefs(body)));
-  });
-  body.querySelectorAll('[data-stop-def]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      if (!confirm('このタスクをやめますか？（過去の記録は残ります）')) return;
-      await api(`/tasks/definitions/${btn.dataset.stopDef}/stop`, {
-        method: 'POST',
-        body: JSON.stringify({ end_date: todayStr() }),
-      });
-      toast('タスクをやめました');
-      renderTaskDefs(body);
-    });
+  fillIcons(view);
+  document.getElementById('new-task-btn').addEventListener('click', () => openTaskDefModal(null, () => renderTasks(view)));
+  view.querySelectorAll('[data-open-def]').forEach((row) => {
+    const def = defs.find((d) => d.id === Number(row.dataset.openDef));
+    row.addEventListener('click', () => openTaskDefModal(def, () => renderTasks(view)));
   });
 }
 
@@ -351,34 +431,40 @@ function freqLabel(d) {
   if (d.freq === 'daily') return '毎日';
   if (d.freq === 'once') return `単発（${d.start_date}）`;
   if (d.freq === 'monthly') return `毎月${d.bymonthday}日`;
-  if (d.freq === 'weekly') {
-    return `毎週 ${(d.byweekday || '').split(',').map((w) => WEEKDAY_LABEL[w] || w).join('・')}`;
-  }
+  if (d.freq === 'weekly') return `毎週 ${(d.byweekday || '').split(',').map((w) => WEEKDAY_LABEL[w] || w).join('・')}`;
   return d.freq;
 }
 
-function defItemHtml(d) {
-  const stopped = d.end_date && d.end_date < todayStr();
+function defRowHtml(d) {
+  const stopped = d.end_date && d.end_date < todayFixed;
   return `
-    <div class="task-item">
-      <div class="task-info">
-        <div class="task-name">${escapeHtml(d.name)}${stopped ? '（停止中）' : ''}</div>
-        <div class="task-meta">${freqLabel(d)}${d.remind_time ? ' ・ ' + d.remind_time.slice(0, 5) : ''}</div>
+    <div class="task-def-row" data-open-def="${d.id}">
+      <span class="task-dot" style="background:${d.color || '#c6cad6'}"></span>
+      <div class="task-row-info">
+        <div class="task-row-name">${escapeHtml(d.name)}${stopped ? '（停止中）' : ''}</div>
+        <div class="task-row-meta">${freqLabel(d)}${d.remind_time ? ' ・ ' + d.remind_time.slice(0, 5) : ''}</div>
       </div>
-      <button class="tx-del" data-edit-def="${d.id}" title="編集" style="font-size:14px;">編集</button>
-      ${!d.end_date ? `<button class="tx-del" data-stop-def="${d.id}" title="やめる">やめる</button>` : ''}
+      <span class="icon-btn" data-icon="chevronRight" data-icon-size="16"></span>
     </div>
   `;
 }
 
 async function openTaskDefModal(def, onSaved) {
   const isEdit = !!def;
-  const d = def || { name: '', task_type: 'routine', freq: 'daily', byweekday: '', bymonthday: '', start_date: todayStr(), end_date: '', remind_time: '', memo: '' };
+  const d = def || { name: '', task_type: 'routine', freq: 'daily', byweekday: '', bymonthday: '', start_date: todayFixed, end_date: '', remind_time: '', color: TASK_COLORS[0], memo: '' };
+  let selectedColor = d.color || TASK_COLORS[0];
+  let selectedWeekdays = new Set((d.byweekday || '').split(',').filter(Boolean));
 
   function draw() {
     openModal(`
-      <h2>${isEdit ? 'タスクを編集' : '新しいタスク'}</h2>
+      <h2>${isEdit ? 'タスクの詳細' : '新しいタスク'}</h2>
       <div class="field"><label>名前</label><input type="text" id="f-name" value="${escapeHtml(d.name)}"></div>
+      <div class="field">
+        <label>色</label>
+        <div class="color-picker" id="f-color">
+          ${TASK_COLORS.map((c) => `<div class="color-swatch ${c === selectedColor ? 'selected' : ''}" data-color="${c}" style="background:${c}"></div>`).join('')}
+        </div>
+      </div>
       <div class="field">
         <label>種別</label>
         <select id="f-type">
@@ -398,7 +484,7 @@ async function openTaskDefModal(def, onSaved) {
       <div class="field" id="f-weekday-wrap" style="display:${d.freq === 'weekly' ? 'block' : 'none'}">
         <label>曜日</label>
         <div class="weekday-picker" id="f-weekday">
-          ${WEEKDAYS.map((w) => `<button type="button" data-w="${w}" class="${(d.byweekday || '').split(',').includes(w) ? 'selected' : ''}">${WEEKDAY_LABEL[w]}</button>`).join('')}
+          ${WEEKDAYS.map((w) => `<button type="button" data-w="${w}" class="${selectedWeekdays.has(w) ? 'selected' : ''}">${WEEKDAY_LABEL[w]}</button>`).join('')}
         </div>
       </div>
       <div class="field" id="f-monthday-wrap" style="display:${d.freq === 'monthly' ? 'block' : 'none'}">
@@ -409,7 +495,8 @@ async function openTaskDefModal(def, onSaved) {
       <div class="field"><label>終了日（任意・無期限ならあける）</label><input type="date" id="f-end" value="${d.end_date || ''}"></div>
       <div class="field"><label>リマインド時刻（任意）</label><input type="time" id="f-remind" value="${d.remind_time ? d.remind_time.slice(0, 5) : ''}"></div>
       <div class="field"><label>メモ（任意）</label><input type="text" id="f-memo" value="${escapeHtml(d.memo || '')}"></div>
-      <button class="btn" id="def-save">保存</button>
+      <button class="btn" id="def-save"><span data-icon="check" data-icon-size="16"></span>保存</button>
+      ${isEdit && !d.end_date ? `<div style="height:8px;"></div><button class="btn secondary" id="def-stop"><span data-icon="stop" data-icon-size="16"></span>このタスクをやめる</button>` : ''}
     `);
 
     document.getElementById('f-freq').addEventListener('change', (e) => {
@@ -417,7 +504,9 @@ async function openTaskDefModal(def, onSaved) {
       document.getElementById('f-weekday-wrap').style.display = d.freq === 'weekly' ? 'block' : 'none';
       document.getElementById('f-monthday-wrap').style.display = d.freq === 'monthly' ? 'block' : 'none';
     });
-    let selectedWeekdays = new Set((d.byweekday || '').split(',').filter(Boolean));
+    document.querySelectorAll('#f-color [data-color]').forEach((sw) => {
+      sw.addEventListener('click', () => { selectedColor = sw.dataset.color; draw(); });
+    });
     document.querySelectorAll('#f-weekday [data-w]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const w = btn.dataset.w;
@@ -436,6 +525,7 @@ async function openTaskDefModal(def, onSaved) {
         start_date: document.getElementById('f-start').value,
         end_date: document.getElementById('f-end').value,
         remind_time: document.getElementById('f-remind').value,
+        color: selectedColor,
         memo: document.getElementById('f-memo').value,
       };
       if (!payload.name.trim()) return toast('名前を入力してください');
@@ -452,134 +542,124 @@ async function openTaskDefModal(def, onSaved) {
         toast(err.message);
       }
     });
+
+    const stopBtn = document.getElementById('def-stop');
+    if (stopBtn) {
+      stopBtn.addEventListener('click', async () => {
+        if (!confirm('このタスクをやめますか？（過去の記録は残ります）')) return;
+        await api(`/tasks/definitions/${def.id}/stop`, { method: 'POST', body: JSON.stringify({ end_date: todayFixed }) });
+        toast('タスクをやめました');
+        closeModal();
+        onSaved();
+      });
+    }
   }
   draw();
 }
 
 // ============================================================
-// A1-05 カレンダー / A1-07 月次サマリー
+// A1-07 サマリー（月次・カテゴリ円グラフ・月比較）
 // ============================================================
-async function renderCalendar(view) {
+async function renderSummary(view) {
   view.innerHTML = `
-    <div class="segmented" id="cal-seg">
-      <button data-view="calendar" class="${state.calView === 'calendar' ? 'active' : ''}">カレンダー</button>
-      <button data-view="monthly" class="${state.calView === 'monthly' ? 'active' : ''}">月次サマリー</button>
-    </div>
     <div class="month-nav">
-      <button id="prev-month">‹</button>
-      <div class="month-label" id="month-label"></div>
-      <button id="next-month">›</button>
+      <button id="sum-prev">${icon('chevronLeft', 20)}</button>
+      <div class="month-label">${monthLabel(state.summaryMonth)}</div>
+      <button id="sum-next">${icon('chevronRight', 20)}</button>
     </div>
-    <div id="cal-body"></div>
+    <div id="summary-body"></div>
   `;
-  document.querySelectorAll('#cal-seg button').forEach((b) => {
-    b.addEventListener('click', () => { state.calView = b.dataset.view; renderCalendar(view); });
-  });
-  document.getElementById('prev-month').addEventListener('click', () => { shiftMonth(-1); renderCalendar(view); });
-  document.getElementById('next-month').addEventListener('click', () => { shiftMonth(1); renderCalendar(view); });
-  document.getElementById('month-label').textContent = monthLabel(state.calMonth);
+  document.getElementById('sum-prev').addEventListener('click', () => { state.summaryMonth = shiftMonth(state.summaryMonth, -1); renderSummary(view); });
+  document.getElementById('sum-next').addEventListener('click', () => { state.summaryMonth = shiftMonth(state.summaryMonth, 1); renderSummary(view); });
 
-  const body = document.getElementById('cal-body');
-  if (state.calView === 'calendar') await renderCalendarGrid(body);
-  else await renderMonthlySummary(body);
-}
+  const [summary, trend] = await Promise.all([
+    api(`/summary/month?month=${state.summaryMonth}`),
+    api('/summary/trend?months=6'),
+  ]);
 
-function shiftMonth(delta) {
-  const [y, m] = state.calMonth.split('-').map(Number);
-  const d = new Date(y, m - 1 + delta, 1);
-  state.calMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-function monthLabel(month) {
-  const [y, m] = month.split('-').map(Number);
-  return `${y}年${m}月`;
-}
-
-async function renderCalendarGrid(body) {
-  const cells = await api(`/calendar?month=${state.calMonth}`);
-  const byDate = {};
-  cells.forEach((c) => { byDate[c.target_date] = c; });
-
-  const [y, m] = state.calMonth.split('-').map(Number);
-  const firstDay = new Date(y, m - 1, 1);
-  const daysInMonth = new Date(y, m, 0).getDate();
-  const startWeekday = firstDay.getDay();
-  const today = todayStr();
-
-  let html = '<div class="card"><div class="cal-grid">';
-  ['日', '月', '火', '水', '木', '金', '土'].forEach((w) => { html += `<div class="cal-head">${w}</div>`; });
-  for (let i = 0; i < startWeekday; i++) html += '<div class="cal-cell empty"></div>';
-  for (let day = 1; day <= daysInMonth; day++) {
-    const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    const c = byDate[dateStr];
-    const net = c && c.net !== null ? Number(c.net) : null;
-    const rate = c && c.rate !== null && c.rate !== undefined ? Number(c.rate) : null;
-    html += `
-      <div class="cal-cell ${dateStr === today ? 'today' : ''}" data-date="${dateStr}">
-        <div class="date-num">${day}</div>
-        ${net !== null ? `<div class="cal-net ${net >= 0 ? 'positive' : 'negative'}">${net >= 0 ? '+' : ''}${Math.round(net / 1000)}k</div>` : ''}
-        ${rate !== null ? `<div class="cal-rate">${rate}%</div>` : ''}
-      </div>`;
-  }
-  html += '</div></div>';
-  body.innerHTML = html;
-
-  body.querySelectorAll('[data-date]').forEach((el) => {
-    el.addEventListener('click', () => openDayDetailModal(el.dataset.date));
-  });
-}
-
-async function openDayDetailModal(date) {
-  const detail = await api(`/calendar/day/${date}`);
-  openModal(`
-    <h2>${escapeHtml(fmtDateLabel(date))}の詳細</h2>
-    <h3 style="font-size:13px;color:var(--muted);">収支</h3>
-    <div id="detail-tx">${renderTxList(detail.transactions)}</div>
-    <h3 style="font-size:13px;color:var(--muted);margin-top:16px;">タスク</h3>
-    <div>${detail.tasks.length ? detail.tasks.map((t) => `
-      <div class="task-item">
-        <div class="task-check ${t.is_done ? 'done' : ''}">${t.is_done ? '✓' : ''}</div>
-        <div class="task-info"><div class="task-name ${t.is_done ? 'done' : ''}">${escapeHtml(t.name)}</div></div>
-      </div>`).join('') : '<div class="empty">予定タスクなし</div>'}</div>
-    <div style="height:12px;"></div>
-    <button class="btn secondary" id="detail-add-tx">この日に収支を追加</button>
-  `);
-  bindTxDelete(document.getElementById('modal-root'), () => openDayDetailModal(date));
-  document.getElementById('detail-add-tx').addEventListener('click', () => openTransactionModal(date));
-}
-
-async function renderMonthlySummary(body) {
-  const summary = await api(`/summary/month?month=${state.calMonth}`);
-  const maxTotal = summary.by_category.length ? Number(summary.by_category[0].total) : 1;
+  const body = document.getElementById('summary-body');
   body.innerHTML = `
     <div class="card">
       <h2>月の収支</h2>
-      <div class="balance-row">
-        <div class="balance-item"><div class="label">収入</div><div class="value income">${fmtYen(summary.income)}</div></div>
-        <div class="balance-item"><div class="label">支出</div><div class="value expense">${fmtYen(summary.expense)}</div></div>
-        <div class="balance-item"><div class="label">収支</div><div class="value net ${summary.net >= 0 ? 'positive' : 'negative'}">${fmtYen(summary.net)}</div></div>
-      </div>
+      <div class="stat-line"><span>収入</span><span class="stat-val income">${fmtYen(summary.income)}</span></div>
+      <div class="stat-line"><span>支出</span><span class="stat-val expense">${fmtYen(summary.expense)}</span></div>
+      <div class="stat-line net"><span>収支</span><span class="stat-val ${summary.net >= 0 ? 'positive' : 'negative'}">${fmtYen(summary.net)}</span></div>
     </div>
     <div class="card">
       <h2>カテゴリ別支出</h2>
-      ${summary.by_category.length ? summary.by_category.map((c) => `
-        <div class="bar-row">
-          <div class="bar-label">${escapeHtml(c.category)}</div>
-          <div class="bar-track"><div class="bar-fill" style="width:${(c.total / maxTotal) * 100}%"></div></div>
-          <div class="bar-value">${fmtYen(c.total)}</div>
-        </div>`).join('') : '<div class="empty">支出記録がありません</div>'}
+      ${pieChartHtml(summary.by_category)}
     </div>
     <div class="card">
-      <h2>タスク完遂率</h2>
+      <h2>今月のタスク完遂率</h2>
       ${summary.task.avg_rate !== null ? `
-        <div class="progress-wrap">
-          <div class="progress-bar"><div style="width:${summary.task.avg_rate}%"></div></div>
-          <div>${summary.task.avg_rate}%</div>
-        </div>
-        <div style="font-size:12px;color:var(--muted);margin-top:6px;">
-          ${summary.task.total_done}/${summary.task.total_planned} 件・予定のあった日数 ${summary.task.active_days}日
+        <div style="display:flex;align-items:center;gap:14px;">
+          ${gaugeHtml(summary.task.total_done, summary.task.total_planned)}
+          <div style="font-size:12px;color:var(--muted);">
+            予定のあった日数 ${summary.task.active_days}日<br>
+            平均完遂率 ${summary.task.avg_rate}%
+          </div>
         </div>` : '<div class="empty">予定タスクがありません</div>'}
     </div>
+    <div class="card">
+      <h2>収支の推移（直近6か月）</h2>
+      ${trendLineChart(trend.map((t) => ({ label: t.month.slice(5) + '月', value: t.net })), { color: 'var(--primary)', zeroLine: true, formatValue: (v) => fmtYen(v) })}
+    </div>
+    <div class="card">
+      <h2>タスク達成率の推移（直近6か月）</h2>
+      ${trendLineChart(trend.map((t) => ({ label: t.month.slice(5) + '月', value: t.task_rate })), { color: 'var(--income)', min: 0, max: 100, formatValue: (v) => (v === null ? '-' : v + '%') })}
+    </div>
+  `;
+}
+
+function pieChartHtml(byCategory) {
+  if (!byCategory.length) return '<div class="empty">支出記録がありません</div>';
+  let acc = 0;
+  const stops = byCategory.map((c, i) => {
+    const start = acc;
+    acc += c.pct;
+    return `${CATEGORY_COLORS[i % CATEGORY_COLORS.length]} ${start}% ${acc}%`;
+  });
+  const gradient = `conic-gradient(${stops.join(', ')})`;
+  return `
+    <div class="pie-wrap">
+      <div class="pie-chart" style="background:${gradient}"></div>
+      <div class="pie-legend">
+        ${byCategory.map((c, i) => `
+          <div class="pie-legend-row">
+            <span class="pie-legend-dot" style="background:${CATEGORY_COLORS[i % CATEGORY_COLORS.length]}"></span>
+            <span class="pie-legend-name">${escapeHtml(c.category)}</span>
+            <span class="pie-legend-val">${fmtYen(c.total)}（${c.pct}%）</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function trendLineChart(points, opts) {
+  const w = 300, h = 96, padX = 10, padY = 16;
+  const values = points.map((p) => p.value).filter((v) => v !== null && v !== undefined);
+  if (!values.length) return '<div class="empty">データがありません</div>';
+  const min = opts.min !== undefined ? opts.min : Math.min(0, ...values);
+  const max = opts.max !== undefined ? opts.max : Math.max(0, ...values);
+  const range = max - min || 1;
+  const stepX = (w - padX * 2) / (points.length - 1 || 1);
+  const xOf = (i) => padX + stepX * i;
+  const yOf = (v) => h - padY - ((v - min) / range) * (h - padY * 2);
+
+  const coords = points.map((p, i) => (p.value === null || p.value === undefined) ? null : [xOf(i), yOf(p.value)]);
+  const pathParts = [];
+  coords.forEach((c, i) => { if (c) pathParts.push(`${pathParts.length && coords[i - 1] ? 'L' : 'M'}${c[0]},${c[1]}`); });
+
+  const zeroY = opts.zeroLine ? yOf(0) : null;
+
+  return `
+    <svg class="trend-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+      ${zeroY !== null ? `<line class="zero-line" x1="${padX}" y1="${zeroY}" x2="${w - padX}" y2="${zeroY}"/>` : ''}
+      <path class="line" d="${pathParts.join(' ')}" stroke="${opts.color}"/>
+      ${coords.map((c) => c ? `<circle class="dot" cx="${c[0]}" cy="${c[1]}" r="2.6" fill="${opts.color}"/>` : '').join('')}
+      ${points.map((p, i) => `<text class="axis-label" x="${xOf(i)}" y="${h - 3}" text-anchor="middle">${p.label}</text>`).join('')}
+    </svg>
   `;
 }
 
@@ -589,17 +669,15 @@ async function renderMonthlySummary(body) {
 async function renderRecords(view) {
   view.innerHTML = `
     <div class="month-nav">
-      <button id="rec-prev">‹</button>
-      <div class="month-label" id="rec-month-label"></div>
-      <button id="rec-next">›</button>
+      <button id="rec-prev">${icon('chevronLeft', 20)}</button>
+      <div class="month-label">${monthLabel(state.recordsMonth)}</div>
+      <button id="rec-next">${icon('chevronRight', 20)}</button>
     </div>
     <div id="rec-body"></div>
   `;
-  document.getElementById('rec-month-label').textContent = monthLabel(state.recordsMonth);
-  document.getElementById('rec-prev').addEventListener('click', () => { shiftRecordsMonth(-1); renderRecords(view); });
-  document.getElementById('rec-next').addEventListener('click', () => { shiftRecordsMonth(1); renderRecords(view); });
+  document.getElementById('rec-prev').addEventListener('click', () => { state.recordsMonth = shiftMonth(state.recordsMonth, -1); renderRecords(view); });
+  document.getElementById('rec-next').addEventListener('click', () => { state.recordsMonth = shiftMonth(state.recordsMonth, 1); renderRecords(view); });
 
-  const monthStart = `${state.recordsMonth}-01`;
   const cells = await api(`/calendar?month=${state.recordsMonth}`);
   const dates = cells.map((c) => c.target_date);
   const results = await Promise.all(dates.map((d) => api(`/transactions?date=${d}`).then((rows) => rows.map((r) => ({ ...r, entry_date: d })))));
@@ -612,14 +690,14 @@ async function renderRecords(view) {
   }
   body.innerHTML = `
     <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <h2 style="margin:0;">記録一覧（${all.length}件）</h2>
-        <button class="tx-del" id="bulk-del" style="border:1px solid var(--border);border-radius:6px;">選択削除</button>
+      <div class="card-header">
+        <h2>記録一覧（${all.length}件）</h2>
+        <button class="btn-labeled" id="bulk-del"><span data-icon="trash" data-icon-size="14"></span>選択削除</button>
       </div>
       ${all.map((t) => `
         <div class="tx-item" data-id="${t.id}">
           <input type="checkbox" class="bulk-check" data-id="${t.id}">
-          <span style="font-size:12px;color:var(--muted);width:44px;flex-shrink:0;">${t.entry_date.slice(5)}</span>
+          <span style="font-size:11px;color:var(--muted);width:40px;flex-shrink:0;">${t.entry_date.slice(5)}</span>
           <span class="tx-cat">${escapeHtml(t.category)}</span>
           <span class="tx-memo">${escapeHtml(t.memo || '')}</span>
           <span class="tx-amount ${t.kind}">${t.kind === 'income' ? '+' : '-'}${fmtYen(t.amount)}</span>
@@ -627,6 +705,7 @@ async function renderRecords(view) {
       `).join('')}
     </div>
   `;
+  fillIcons(body);
   document.getElementById('bulk-del').addEventListener('click', async () => {
     const ids = Array.from(document.querySelectorAll('.bulk-check:checked')).map((c) => c.dataset.id);
     if (!ids.length) return toast('削除する項目を選択してください');
@@ -635,12 +714,6 @@ async function renderRecords(view) {
     toast('削除しました');
     renderRecords(view);
   });
-}
-
-function shiftRecordsMonth(delta) {
-  const [y, m] = state.recordsMonth.split('-').map(Number);
-  const d = new Date(y, m - 1 + delta, 1);
-  state.recordsMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
 // ============================================================
@@ -660,17 +733,13 @@ async function renderSettings(view) {
     </div>
     <div class="card">
       <h2>支出カテゴリ</h2>
-      <ul class="settings-list" id="cat-expense">
-        ${expense.map(catRowHtml).join('')}
-      </ul>
+      <ul class="settings-list" id="cat-expense">${expense.map(catRowHtml).join('')}</ul>
       <div style="height:8px;"></div>
       <button class="btn secondary" data-add-cat="expense">＋ 支出カテゴリを追加</button>
     </div>
     <div class="card">
       <h2>収入カテゴリ</h2>
-      <ul class="settings-list" id="cat-income">
-        ${income.map(catRowHtml).join('')}
-      </ul>
+      <ul class="settings-list" id="cat-income">${income.map(catRowHtml).join('')}</ul>
       <div style="height:8px;"></div>
       <button class="btn secondary" data-add-cat="income">＋ 収入カテゴリを追加</button>
     </div>
@@ -679,13 +748,14 @@ async function renderSettings(view) {
       <ul class="settings-list">
         ${defs.map((d) => `
           <li>
-            <span>${escapeHtml(d.name)}${d.end_date && d.end_date < todayStr() ? '（停止中）' : ''}</span>
-            <button class="tx-del" data-hard-del="${d.id}" data-name="${escapeHtml(d.name)}">完全に削除</button>
+            <span>${escapeHtml(d.name)}${d.end_date && d.end_date < todayFixed ? '（停止中）' : ''}</span>
+            <button class="icon-btn" data-hard-del="${d.id}" data-name="${escapeHtml(d.name)}" data-icon="trash" data-icon-size="16"></button>
           </li>
         `).join('') || '<li class="empty">タスクがありません</li>'}
       </ul>
     </div>
   `;
+  fillIcons(view);
 
   document.getElementById('logout-btn').addEventListener('click', async () => {
     await api('/auth/logout', { method: 'POST' });
@@ -795,6 +865,7 @@ function renderAuthScreen(mode, errorMsg) {
 }
 
 async function boot() {
+  fillIcons(document);
   try {
     state.user = await api('/auth/me');
     showApp();
@@ -810,6 +881,5 @@ async function boot() {
 document.querySelectorAll('nav.tabbar button').forEach((btn) => {
   btn.addEventListener('click', () => setTab(btn.dataset.tab));
 });
-document.getElementById('fab-add').addEventListener('click', () => openTransactionModal(state.todayDate));
 
 boot();
