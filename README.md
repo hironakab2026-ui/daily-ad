@@ -36,6 +36,7 @@
    mysql -u root -p life_manager < db/02_seed.sql
    mysql -u root -p life_manager < db/04_multiuser.sql
    mysql -u root -p life_manager < db/05_service_connections.sql
+   mysql -u root -p life_manager < db/06_schedule.sql
    ```
 
 4. サーバーを起動
@@ -79,6 +80,18 @@
 | POST | `/api/connections/:contentKey/connect` | 連携トークンを発行 |
 | POST | `/api/connections/:contentKey/disconnect` | 連携を解除 |
 | POST | `/api/integrations/summary` | （外部サービス用・トークン認証）その日の要約をpush |
+| GET | `/api/schedule/calendars` | スケジュール：用途別カレンダー一覧 |
+| POST | `/api/schedule/calendars` | カレンダー作成 |
+| PATCH | `/api/schedule/calendars/:id` | カレンダー更新（名前・色・表示ON/OFF） |
+| DELETE | `/api/schedule/calendars/:id` | カレンダー削除（論理削除、今日以降の予定をキャンセル） |
+| GET | `/api/schedule/events?start=&end=` | 期間内の予定（生成済みの回）一覧 |
+| POST | `/api/schedule/events` | 予定（シリーズ）の作成 |
+| GET | `/api/schedule/events/:id` | 予定（シリーズ）の定義を1件取得 |
+| PATCH | `/api/schedule/events/:id` | 予定（シリーズ）の編集 |
+| DELETE | `/api/schedule/events/:id` | 予定（シリーズ）の削除（論理削除） |
+| GET | `/api/schedule/bars?start=&end=` | 月表示・ホームカード用の棒状（時間帯のみ）サマリー |
+| PATCH | `/api/schedule/occurrences/:id` | 1回だけの編集（例外扱いになる） |
+| DELETE | `/api/schedule/occurrences/:id` | 1回だけのキャンセル |
 
 `/api/integrations/*` 以外は端末Cookie必須です（`server/middleware/auth.js`、ログイン画面はなし）。`/api/integrations/*` は `Authorization: Bearer <トークン>` で認証します（詳細は [00_システム全体構成・連携仕様.md](./00_システム全体構成・連携仕様.md)）。
 

@@ -18,7 +18,12 @@ const state = {
   taskOpen: true,
   categories: [],
   user: null,
+  // スケジュール管理アプリ（APP-4）
+  scheduleMode: 'week', // 'week' | 'day' | 'month'
+  scheduleAnchor: todayFixed,
 };
+
+const SCHED_ROW_H = 44; // 時間軸グリッドの1時間あたりの高さ(px)
 
 function todayStr() {
   const d = new Date();
@@ -30,11 +35,14 @@ function fmtYen(n) {
   return `¥${Number(n).toLocaleString('ja-JP')}`;
 }
 
+function weekdayKanji(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return ['日', '月', '火', '水', '木', '金', '土'][new Date(y, m - 1, d).getDay()];
+}
+
 function fmtDateLabel(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
-  const dt = new Date(y, m - 1, d);
-  const w = ['日', '月', '火', '水', '木', '金', '土'][dt.getDay()];
-  return `${m}月${d}日(${w})`;
+  return `${m}月${d}日(${weekdayKanji(dateStr)})`;
 }
 
 function monthLabel(month) {
@@ -46,6 +54,54 @@ function shiftMonth(month, delta) {
   const [y, m] = month.split('-').map(Number);
   const d = new Date(y, m - 1 + delta, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function toDateStr(dt) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+}
+
+function addDays(dateStr, n) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + n);
+  return toDateStr(dt);
+}
+
+function startOfWeekSun(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() - dt.getDay());
+  return toDateStr(dt);
+}
+
+function weekDaysOf(anchor) {
+  const start = startOfWeekSun(anchor);
+  return Array.from({ length: 7 }, (_, i) => addDays(start, i));
+}
+
+// 'YYYY-MM-DD HH:MM:SS' -> 9.5 (時の小数表現)。棒グラフ（day-bar）と時間軸グリッドの両方で使う
+function hourDecimal(datetimeStr) {
+  const time = (datetimeStr || '').split(' ')[1] || '00:00:00';
+  const [h, m] = time.split(':').map(Number);
+  return h + m / 60;
+}
+
+// 棒状（視覚専用）の1日サマリー。予定名などの詳細は一切持たない。
+// ハブのホーム画面カードと、スケジュールアプリ自身の月表示の両方で使う。
+function dayBarSvg(segments, opts = {}) {
+  const H = opts.height || 10;
+  const W = 100;
+  const rects = (segments || []).slice(0, 8).map(([s, e, color]) => {
+    const x = (s / 24) * W;
+    const w = Math.max(((e - s) / 24) * W, 1.4);
+    return `<rect x="${x.toFixed(1)}" y="0" width="${w.toFixed(1)}" height="${H}" rx="${H / 2}" fill="${color || 'var(--primary)'}"/>`;
+  }).join('');
+  return `
+    <svg class="day-bar" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%" height="${H}">
+      <rect x="0" y="0" width="${W}" height="${H}" rx="${H / 2}" fill="var(--border)"/>
+      ${rects}
+    </svg>`;
 }
 
 async function api(path, options = {}) {
@@ -107,7 +163,7 @@ function fillIcons(root) {
 // ------------------------------------------------------------
 // ルーティング / タブ
 // ------------------------------------------------------------
-const TAB_TITLES = { today: '今日', tasks: 'タスク', summary: 'サマリー', records: '記録', settings: '設定' };
+const TAB_TITLES = { today: '今日', tasks: 'タスク', schedule: '予定', summary: 'サマリー', records: '記録', settings: '設定' };
 
 function setTab(tab) {
   state.tab = tab;
@@ -124,6 +180,7 @@ async function render() {
   try {
     if (state.tab === 'today') await renderToday(view);
     else if (state.tab === 'tasks') await renderTasks(view);
+    else if (state.tab === 'schedule') await renderSchedule(view);
     else if (state.tab === 'summary') await renderSummary(view);
     else if (state.tab === 'records') await renderRecords(view);
     else if (state.tab === 'settings') await renderSettings(view);
@@ -168,6 +225,8 @@ async function renderToday(view) {
       </div>
     </div>
 
+    ${scheduleSummaryCardHtml(summary.schedule)}
+
     ${connected.map(connectedServiceCardHtml).join('')}
 
     <div class="card">
@@ -209,6 +268,11 @@ async function renderToday(view) {
   });
   document.getElementById('add-task-btn').addEventListener('click', () => openTaskDefModal(null, () => renderToday(view)));
   document.getElementById('add-tx-btn').addEventListener('click', () => openTransactionModal(date, () => renderToday(view)));
+  document.getElementById('open-schedule-btn').addEventListener('click', () => {
+    state.scheduleAnchor = todayFixed;
+    state.scheduleMode = 'day';
+    setTab('schedule');
+  });
   bindServiceLinks(view);
 
   // 収支明細アコーディオン
@@ -309,6 +373,24 @@ function connectedServiceCardHtml(s) {
         </div>
       ` : `<div class="empty" style="padding:6px 0;">まだこの日の記録はありません</div>`}
       ${s.deep_link ? `<div style="height:8px;"></div><button class="btn secondary" data-open-link="${escapeHtml(s.deep_link)}">${escapeHtml(s.display_name)}を開く</button>` : ''}
+    </div>
+  `;
+}
+
+// ホーム画面のスケジュールカード：棒状（bars）＋件数のみを表示する（予定名などの詳細は持たない）。
+// 04_要件定義書_スケジュール管理アプリ.md F-13、CLAUDE.md 4.1（他コンテンツの詳細を描画しない）に対応。
+function scheduleSummaryCardHtml(schedule) {
+  const hasData = schedule && schedule.status && schedule.status !== 'none';
+  const bars = (hasData && schedule.metrics && schedule.metrics.bars) || [];
+  return `
+    <div class="card">
+      <div class="card-header">
+        <h2>予定</h2>
+        ${hasData && schedule.badge ? `<span class="btn-labeled" style="background:var(--primary-soft);">${escapeHtml(schedule.badge)}</span>` : ''}
+      </div>
+      ${hasData ? `<div style="margin:6px 0 2px;">${dayBarSvg(bars, { height: 14 })}</div>` : '<div class="empty" style="padding:6px 0;">今日の予定はありません</div>'}
+      <div style="height:8px;"></div>
+      <button class="btn secondary" id="open-schedule-btn">予定を見る</button>
     </div>
   `;
 }
@@ -591,6 +673,480 @@ async function openTaskDefModal(def, onSaved) {
     }
   }
   draw();
+}
+
+// ============================================================
+// スケジュール管理アプリ（APP-4）：A4-01〜A4-06
+//   週表示・日表示は同じ時間軸グリッドを共用する（F-12-02）。
+//   月表示は棒状（day-bar）で日ごとの概要のみを示す（詳細な予定名は出さない）。
+// ============================================================
+function scheduleTitleLabel() {
+  if (state.scheduleMode === 'month') return monthLabel(state.scheduleAnchor.slice(0, 7));
+  if (state.scheduleMode === 'day') return fmtDateLabel(state.scheduleAnchor);
+  const days = weekDaysOf(state.scheduleAnchor);
+  return `${fmtDateLabel(days[0])} 〜 ${fmtDateLabel(days[6])}`;
+}
+
+function shiftScheduleAnchor(delta) {
+  if (state.scheduleMode === 'month') {
+    state.scheduleAnchor = `${shiftMonth(state.scheduleAnchor.slice(0, 7), delta)}-01`;
+  } else if (state.scheduleMode === 'week') {
+    state.scheduleAnchor = addDays(state.scheduleAnchor, delta * 7);
+  } else {
+    state.scheduleAnchor = addDays(state.scheduleAnchor, delta);
+  }
+}
+
+async function renderSchedule(view) {
+  const calendars = await api('/schedule/calendars');
+  view.innerHTML = `
+    <div class="sched-toolbar">
+      <div class="segmented" id="sched-mode-seg">
+        <button data-mode="week" class="${state.scheduleMode === 'week' ? 'active' : ''}">週</button>
+        <button data-mode="day" class="${state.scheduleMode === 'day' ? 'active' : ''}">日</button>
+        <button data-mode="month" class="${state.scheduleMode === 'month' ? 'active' : ''}">月</button>
+      </div>
+    </div>
+    <div class="sched-nav">
+      <button class="icon-btn" id="sched-prev" data-icon="chevronLeft" data-icon-size="18"></button>
+      <div class="sched-title" id="sched-title">${escapeHtml(scheduleTitleLabel())}</div>
+      <button class="icon-btn" id="sched-next" data-icon="chevronRight" data-icon-size="18"></button>
+      <button class="btn-labeled" id="sched-today-btn">今日</button>
+      <button class="icon-btn" id="sched-manage-cal" data-icon="settings" data-icon-size="18"></button>
+      <button class="btn-labeled" id="sched-add-btn"><span data-icon="plus"></span>予定</button>
+    </div>
+    <div id="sched-body"></div>
+  `;
+  fillIcons(view);
+
+  document.querySelectorAll('#sched-mode-seg button').forEach((b) => {
+    b.addEventListener('click', () => { state.scheduleMode = b.dataset.mode; renderSchedule(view); });
+  });
+  document.getElementById('sched-prev').addEventListener('click', () => { shiftScheduleAnchor(-1); renderSchedule(view); });
+  document.getElementById('sched-next').addEventListener('click', () => { shiftScheduleAnchor(1); renderSchedule(view); });
+  document.getElementById('sched-today-btn').addEventListener('click', () => { state.scheduleAnchor = todayFixed; renderSchedule(view); });
+  document.getElementById('sched-manage-cal').addEventListener('click', () => openCalendarManageModal(() => renderSchedule(view)));
+  document.getElementById('sched-add-btn').addEventListener('click', () => {
+    openScheduleEventModal(null, calendars, state.scheduleAnchor, () => renderSchedule(view));
+  });
+
+  if (state.scheduleMode === 'month') await renderScheduleMonth(view, calendars);
+  else await renderScheduleGrid(view, calendars);
+}
+
+// ---------- 週表示・日表示（時間軸グリッド、A4-01/A4-02） ----------
+async function renderScheduleGrid(view, calendars) {
+  const days = state.scheduleMode === 'day' ? [state.scheduleAnchor] : weekDaysOf(state.scheduleAnchor);
+  const start = days[0];
+  const end = days[days.length - 1];
+  const events = await api(`/schedule/events?start=${start}&end=${end}`);
+
+  document.getElementById('sched-body').innerHTML = timeGridHtml(days, events);
+  fillIcons(document.getElementById('sched-body'));
+
+  document.getElementById('sched-body').querySelectorAll('[data-occ]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const occ = events.find((e) => e.id === Number(el.dataset.occ));
+      if (occ) openOccurrenceModal(occ, calendars, () => renderSchedule(view));
+    });
+  });
+
+  const scroller = document.getElementById('sched-grid-scroll');
+  if (scroller) scroller.scrollTop = Math.max(0, 7 * SCHED_ROW_H - 40);
+}
+
+function timeGridHtml(days, events) {
+  const cols = `44px repeat(${days.length}, 1fr)`;
+  const hasAllDay = days.some((d) => events.some((e) => e.occurrence_date === d && e.is_all_day));
+  return `
+    <div class="grid-headrow" style="grid-template-columns:${cols}">
+      <div></div>
+      ${days.map((d) => `
+        <div class="grid-head-cell ${d === todayFixed ? 'today' : ''}">
+          <div class="ghc-w">${weekdayKanji(d)}</div>
+          <div class="ghc-d">${Number(d.slice(8, 10))}</div>
+        </div>`).join('')}
+    </div>
+    ${hasAllDay ? `
+    <div class="grid-allday-row" style="grid-template-columns:${cols}">
+      <div class="grid-allday-label">終日</div>
+      ${days.map((d) => `<div class="grid-allday-cell">${allDayChipsHtml(d, events)}</div>`).join('')}
+    </div>` : ''}
+    <div class="grid-scroll" id="sched-grid-scroll">
+      <div class="grid-body" style="grid-template-columns:${cols};height:${24 * SCHED_ROW_H}px;">
+        <div class="grid-hourlabels">${hourLabelsHtml()}</div>
+        ${days.map((d) => `
+          <div class="grid-daycol" data-date="${d}" style="height:${24 * SCHED_ROW_H}px;background-size:100% ${SCHED_ROW_H}px;">
+            ${eventBlocksHtml(d, events)}
+            ${d === todayFixed ? nowLineHtml() : ''}
+          </div>`).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function hourLabelsHtml() {
+  let html = '';
+  for (let h = 0; h < 24; h++) {
+    html += `<div class="hour-label" style="top:${h * SCHED_ROW_H}px;">${h}:00</div>`;
+  }
+  return html;
+}
+
+function nowLineHtml() {
+  const now = new Date();
+  const top = (now.getHours() + now.getMinutes() / 60) * SCHED_ROW_H;
+  return `<div class="now-line" style="top:${top}px;"></div>`;
+}
+
+function allDayChipsHtml(date, events) {
+  const items = events.filter((e) => e.occurrence_date === date && e.is_all_day);
+  return items.map((e) => `
+    <div class="allday-chip" style="background:${e.calendar_color}22;border-left:3px solid ${e.calendar_color};" data-occ="${e.id}">
+      ${escapeHtml(e.title)}
+    </div>`).join('');
+}
+
+// 同じ日に重なる予定を単純な列分割で並べる（厳密な区間グラフ彩色ではない簡易版）
+function layoutDayEvents(dayEvents) {
+  const sorted = [...dayEvents].sort((a, b) => hourDecimal(a.start_at) - hourDecimal(b.start_at));
+  const colEnds = [];
+  sorted.forEach((e) => {
+    e._s = hourDecimal(e.start_at);
+    e._e = hourDecimal(e.end_at);
+    let col = colEnds.findIndex((end) => end <= e._s);
+    if (col === -1) { col = colEnds.length; colEnds.push(e._e); } else { colEnds[col] = e._e; }
+    e._col = col;
+  });
+  const totalCols = colEnds.length || 1;
+  sorted.forEach((e) => { e._totalCols = totalCols; });
+  return sorted;
+}
+
+function eventBlocksHtml(date, events) {
+  const dayEvents = events.filter((e) => e.occurrence_date === date && !e.is_all_day);
+  const laid = layoutDayEvents(dayEvents);
+  return laid.map((e) => {
+    const top = e._s * SCHED_ROW_H;
+    const height = Math.max((e._e - e._s) * SCHED_ROW_H, 20);
+    const widthPct = 100 / e._totalCols;
+    const leftPct = widthPct * e._col;
+    return `
+      <div class="event-block" data-occ="${e.id}"
+           style="top:${top}px;height:${height}px;left:${leftPct}%;width:calc(${widthPct}% - 3px);
+                  background:${e.calendar_color}22;border-left:3px solid ${e.calendar_color};">
+        <div class="event-block-time">${e.start_at.slice(11, 16)}</div>
+        <div class="event-block-title">${escapeHtml(e.title)}</div>
+      </div>`;
+  }).join('');
+}
+
+// ---------- 月表示（A4-03）：日ごとの棒状サマリーのみ。予定名は出さない ----------
+async function renderScheduleMonth(view, calendars) {
+  const month = state.scheduleAnchor.slice(0, 7);
+  const [y, m] = month.split('-').map(Number);
+  const monthStart = `${month}-01`;
+  const monthEnd = `${month}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`;
+  const bars = await api(`/schedule/bars?start=${monthStart}&end=${monthEnd}`);
+
+  document.getElementById('sched-body').innerHTML = monthGridHtml(month, bars);
+  document.getElementById('sched-body').querySelectorAll('[data-date]').forEach((cell) => {
+    cell.addEventListener('click', () => {
+      state.scheduleAnchor = cell.dataset.date;
+      state.scheduleMode = 'day';
+      renderSchedule(view);
+    });
+  });
+}
+
+function monthGridHtml(month, bars) {
+  const [y, m] = month.split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const startWeekday = new Date(y, m - 1, 1).getDay();
+  let cellsHtml = '';
+  ['日', '月', '火', '水', '木', '金', '土'].forEach((w) => { cellsHtml += `<div class="sm-head">${w}</div>`; });
+  for (let i = 0; i < startWeekday; i++) cellsHtml += '<div class="sm-cell empty"></div>';
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${month}-${String(day).padStart(2, '0')}`;
+    const b = bars[dateStr];
+    cellsHtml += `
+      <div class="sm-cell ${dateStr === todayFixed ? 'today' : ''}" data-date="${dateStr}">
+        <div class="sm-daynum">${day}</div>
+        ${b ? dayBarSvg(b.segments, { height: 7 }) : ''}
+        ${b && b.all_day_count ? '<div class="sm-allday-dot"></div>' : ''}
+      </div>`;
+  }
+  return `<div class="sched-month-grid">${cellsHtml}</div>`;
+}
+
+// ---------- カレンダー（用途別グループ）管理 A4-06 ----------
+async function openCalendarManageModal(onDone) {
+  const calendars = await api('/schedule/calendars');
+  openModal(`
+    <h2>カレンダー管理</h2>
+    <ul class="settings-list" id="cal-list">
+      ${calendars.map((c) => `
+        <li>
+          <span style="display:flex;align-items:center;gap:8px;min-width:0;">
+            <span class="task-dot" style="background:${c.color}"></span>
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(c.name)}</span>
+          </span>
+          <span style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
+            <button class="link-row" data-toggle-vis="${c.id}" data-vis="${c.is_visible}" style="background:none;border:none;font-size:13px;">${c.is_visible ? '表示中' : '非表示'}</button>
+            <button class="icon-btn" data-del-cal="${c.id}" data-icon="trash" data-icon-size="16"></button>
+          </span>
+        </li>
+      `).join('')}
+    </ul>
+    <div style="height:10px;"></div>
+    <div class="field"><label>新しいカレンダー名</label><input type="text" id="new-cal-name"></div>
+    <div class="field">
+      <label>色</label>
+      <div class="color-picker" id="new-cal-color">
+        ${TASK_COLORS.map((c, i) => `<div class="color-swatch ${i === 0 ? 'selected' : ''}" data-color="${c}" style="background:${c}"></div>`).join('')}
+      </div>
+    </div>
+    <button class="btn secondary" id="add-cal-btn">追加</button>
+  `);
+  fillIcons(document.getElementById('modal-root'));
+
+  let newColor = TASK_COLORS[0];
+  document.querySelectorAll('#new-cal-color [data-color]').forEach((sw) => {
+    sw.addEventListener('click', () => {
+      newColor = sw.dataset.color;
+      document.querySelectorAll('#new-cal-color .color-swatch').forEach((x) => x.classList.remove('selected'));
+      sw.classList.add('selected');
+    });
+  });
+  document.querySelectorAll('[data-toggle-vis]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await api(`/schedule/calendars/${btn.dataset.toggleVis}`, { method: 'PATCH', body: JSON.stringify({ is_visible: Number(btn.dataset.vis) ? 0 : 1 }) });
+      closeModal();
+      onDone();
+    });
+  });
+  document.querySelectorAll('[data-del-cal]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('このカレンダーを削除しますか？（このカレンダーの予定は今日以降キャンセルされます。過去の記録は残ります）')) return;
+      try {
+        await api(`/schedule/calendars/${btn.dataset.delCal}`, { method: 'DELETE' });
+        toast('削除しました');
+        closeModal();
+        onDone();
+      } catch (err) {
+        toast(err.message);
+      }
+    });
+  });
+  document.getElementById('add-cal-btn').addEventListener('click', async () => {
+    const name = document.getElementById('new-cal-name').value.trim();
+    if (!name) return toast('名前を入力してください');
+    await api('/schedule/calendars', { method: 'POST', body: JSON.stringify({ name, color: newColor }) });
+    toast('追加しました');
+    closeModal();
+    onDone();
+  });
+}
+
+// ---------- 予定の作成・編集（A4-04） ----------
+async function openScheduleEventModal(def, calendars, defaultDate, onSaved) {
+  const isEdit = !!def;
+  const d = def || {
+    calendar_id: calendars[0] ? calendars[0].id : null,
+    title: '', location: '', memo: '',
+    is_all_day: 0, start_time: '09:00', end_time: '10:00',
+    freq: 'once', byweekday: '', bymonthday: '',
+    start_date: defaultDate || todayFixed, end_date: '', remind_minutes_before: '',
+  };
+  let selectedCalendar = d.calendar_id;
+  let selectedWeekdays = new Set((d.byweekday || '').split(',').filter(Boolean));
+  let isAllDay = !!Number(d.is_all_day);
+  let freq = d.freq;
+
+  function draw() {
+    openModal(`
+      <h2>${isEdit ? '予定の編集' : '新しい予定'}</h2>
+      <div class="field"><label>タイトル</label><input type="text" id="f-title" value="${escapeHtml(d.title)}"></div>
+      <div class="field">
+        <label>カレンダー</label>
+        <div class="color-picker" id="f-cal">
+          ${calendars.map((c) => `<div class="color-swatch ${c.id === selectedCalendar ? 'selected' : ''}" data-cal="${c.id}" style="background:${c.color}" title="${escapeHtml(c.name)}"></div>`).join('')}
+        </div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:12px;">
+        <input type="checkbox" id="f-allday" ${isAllDay ? 'checked' : ''}> 終日
+      </label>
+      <div class="field"><label>日付</label><input type="date" id="f-date" value="${d.start_date}"></div>
+      <div class="field" id="f-time-wrap" style="display:${isAllDay ? 'none' : 'flex'};gap:8px;">
+        <div style="flex:1;"><label>開始</label><input type="time" id="f-start-time" value="${d.start_time ? d.start_time.slice(0, 5) : '09:00'}"></div>
+        <div style="flex:1;"><label>終了</label><input type="time" id="f-end-time" value="${d.end_time ? d.end_time.slice(0, 5) : '10:00'}"></div>
+      </div>
+      <div class="field">
+        <label>繰り返し</label>
+        <select id="f-freq">
+          <option value="once" ${freq === 'once' ? 'selected' : ''}>繰り返さない</option>
+          <option value="daily" ${freq === 'daily' ? 'selected' : ''}>毎日</option>
+          <option value="weekly" ${freq === 'weekly' ? 'selected' : ''}>毎週</option>
+          <option value="monthly" ${freq === 'monthly' ? 'selected' : ''}>毎月</option>
+        </select>
+      </div>
+      <div class="field" id="f-weekday-wrap" style="display:${freq === 'weekly' ? 'block' : 'none'}">
+        <label>曜日</label>
+        <div class="weekday-picker" id="f-weekday">
+          ${WEEKDAYS.map((w) => `<button type="button" data-w="${w}" class="${selectedWeekdays.has(w) ? 'selected' : ''}">${WEEKDAY_LABEL[w]}</button>`).join('')}
+        </div>
+      </div>
+      <div class="field" id="f-monthday-wrap" style="display:${freq === 'monthly' ? 'block' : 'none'}">
+        <label>毎月の日付</label>
+        <input type="number" id="f-monthday" min="1" max="31" value="${d.bymonthday || ''}">
+      </div>
+      <div class="field" id="f-enddate-wrap" style="display:${freq !== 'once' ? 'block' : 'none'}">
+        <label>繰り返しの終了日（任意・無期限ならあける）</label>
+        <input type="date" id="f-end-date" value="${d.end_date || ''}">
+      </div>
+      <div class="field">
+        <label>リマインド（任意）</label>
+        <select id="f-remind">
+          <option value="">なし</option>
+          <option value="5" ${String(d.remind_minutes_before) === '5' ? 'selected' : ''}>5分前</option>
+          <option value="10" ${String(d.remind_minutes_before) === '10' ? 'selected' : ''}>10分前</option>
+          <option value="30" ${String(d.remind_minutes_before) === '30' ? 'selected' : ''}>30分前</option>
+          <option value="60" ${String(d.remind_minutes_before) === '60' ? 'selected' : ''}>1時間前</option>
+          <option value="1440" ${String(d.remind_minutes_before) === '1440' ? 'selected' : ''}>前日</option>
+        </select>
+      </div>
+      <div class="field"><label>場所（任意）</label><input type="text" id="f-location" value="${escapeHtml(d.location || '')}"></div>
+      <div class="field"><label>メモ（任意）</label><input type="text" id="f-memo" value="${escapeHtml(d.memo || '')}"></div>
+      <button class="btn" id="sched-save"><span data-icon="check" data-icon-size="16"></span>保存</button>
+      ${isEdit ? '<div style="height:8px;"></div><button class="btn danger" id="sched-delete-series"><span data-icon="trash" data-icon-size="16"></span>この予定（シリーズ）を削除</button>' : ''}
+    `);
+    fillIcons(document.getElementById('modal-root'));
+
+    document.getElementById('f-allday').addEventListener('change', (e) => {
+      isAllDay = e.target.checked;
+      document.getElementById('f-time-wrap').style.display = isAllDay ? 'none' : 'flex';
+    });
+    document.querySelectorAll('#f-cal [data-cal]').forEach((sw) => {
+      sw.addEventListener('click', () => { selectedCalendar = Number(sw.dataset.cal); draw(); });
+    });
+    document.getElementById('f-freq').addEventListener('change', (e) => {
+      freq = e.target.value;
+      document.getElementById('f-weekday-wrap').style.display = freq === 'weekly' ? 'block' : 'none';
+      document.getElementById('f-monthday-wrap').style.display = freq === 'monthly' ? 'block' : 'none';
+      document.getElementById('f-enddate-wrap').style.display = freq !== 'once' ? 'block' : 'none';
+    });
+    document.querySelectorAll('#f-weekday [data-w]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const w = btn.dataset.w;
+        if (selectedWeekdays.has(w)) selectedWeekdays.delete(w); else selectedWeekdays.add(w);
+        btn.classList.toggle('selected');
+      });
+    });
+
+    document.getElementById('sched-save').addEventListener('click', async () => {
+      const payload = {
+        calendar_id: selectedCalendar,
+        title: document.getElementById('f-title').value,
+        location: document.getElementById('f-location').value,
+        memo: document.getElementById('f-memo').value,
+        is_all_day: isAllDay ? 1 : 0,
+        start_time: isAllDay ? '' : document.getElementById('f-start-time').value,
+        end_time: isAllDay ? '' : document.getElementById('f-end-time').value,
+        freq,
+        byweekday: selectedWeekdays.size ? Array.from(selectedWeekdays).join(',') : '',
+        bymonthday: document.getElementById('f-monthday').value || '',
+        start_date: document.getElementById('f-date').value,
+        end_date: document.getElementById('f-end-date').value,
+        remind_minutes_before: document.getElementById('f-remind').value || '',
+      };
+      if (!payload.title.trim()) return toast('タイトルを入力してください');
+      if (!payload.calendar_id) return toast('カレンダーを選択してください（先にカレンダー管理から作成してください）');
+      try {
+        if (isEdit) {
+          await api(`/schedule/events/${def.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+        } else {
+          await api('/schedule/events', { method: 'POST', body: JSON.stringify(payload) });
+        }
+        toast('保存しました');
+        closeModal();
+        onSaved();
+      } catch (err) {
+        toast(err.message);
+      }
+    });
+
+    const delBtn = document.getElementById('sched-delete-series');
+    if (delBtn) {
+      delBtn.addEventListener('click', async () => {
+        if (!confirm('この予定を削除します。過去の記録は残りますが、今日以降の回はキャンセルされます。よろしいですか？')) return;
+        await api(`/schedule/events/${def.id}`, { method: 'DELETE' });
+        toast('削除しました');
+        closeModal();
+        onSaved();
+      });
+    }
+  }
+  draw();
+}
+
+// ---------- 予定の詳細（A4-05）：この回だけ編集／シリーズ編集／この回だけキャンセル ----------
+function openOccurrenceModal(occ, calendars, onDone) {
+  openModal(`
+    <h2>${escapeHtml(occ.title)}</h2>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:10px;">
+      ${escapeHtml(fmtDateLabel(occ.occurrence_date))}${occ.is_all_day ? '（終日）' : ` ${occ.start_at.slice(11, 16)}〜${occ.end_at.slice(11, 16)}`}
+    </div>
+    ${occ.location ? `<div style="font-size:13px;margin-bottom:4px;">${escapeHtml(occ.location)}</div>` : ''}
+    ${occ.memo ? `<div style="font-size:13px;color:var(--muted);margin-bottom:10px;">${escapeHtml(occ.memo)}</div>` : ''}
+    <button class="btn secondary" id="occ-edit-once">この回だけ編集</button>
+    <div style="height:8px;"></div>
+    <button class="btn secondary" id="occ-edit-series">シリーズ全体を編集</button>
+    <div style="height:8px;"></div>
+    <button class="btn secondary" id="occ-cancel-once">この回だけキャンセル</button>
+  `);
+  document.getElementById('occ-edit-once').addEventListener('click', () => openOccurrenceEditModal(occ, onDone));
+  document.getElementById('occ-edit-series').addEventListener('click', async () => {
+    const def = await api(`/schedule/events/${occ.schedule_definition_id}`);
+    openScheduleEventModal(def, calendars, null, onDone);
+  });
+  document.getElementById('occ-cancel-once').addEventListener('click', async () => {
+    if (!confirm('この回だけキャンセルします。シリーズの他の回には影響しません。よろしいですか？')) return;
+    await api(`/schedule/occurrences/${occ.id}`, { method: 'DELETE' });
+    toast('キャンセルしました');
+    closeModal();
+    onDone();
+  });
+}
+
+function openOccurrenceEditModal(occ, onDone) {
+  openModal(`
+    <h2>この回だけ編集</h2>
+    <div class="field"><label>タイトル</label><input type="text" id="oe-title" value="${escapeHtml(occ.title)}"></div>
+    ${!occ.is_all_day ? `
+    <div class="field" style="display:flex;gap:8px;">
+      <div style="flex:1;"><label>開始</label><input type="time" id="oe-start" value="${occ.start_at.slice(11, 16)}"></div>
+      <div style="flex:1;"><label>終了</label><input type="time" id="oe-end" value="${occ.end_at.slice(11, 16)}"></div>
+    </div>` : ''}
+    <div class="field"><label>場所</label><input type="text" id="oe-location" value="${escapeHtml(occ.location || '')}"></div>
+    <div class="field"><label>メモ</label><input type="text" id="oe-memo" value="${escapeHtml(occ.memo || '')}"></div>
+    <button class="btn" id="oe-save">保存</button>
+  `);
+  document.getElementById('oe-save').addEventListener('click', async () => {
+    const payload = {
+      title: document.getElementById('oe-title').value,
+      location: document.getElementById('oe-location').value,
+      memo: document.getElementById('oe-memo').value,
+    };
+    if (!payload.title.trim()) return toast('タイトルを入力してください');
+    if (!occ.is_all_day) {
+      payload.start_at = `${occ.occurrence_date} ${document.getElementById('oe-start').value}:00`;
+      payload.end_at = `${occ.occurrence_date} ${document.getElementById('oe-end').value}:00`;
+    }
+    await api(`/schedule/occurrences/${occ.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+    toast('保存しました');
+    closeModal();
+    onDone();
+  });
 }
 
 // ============================================================

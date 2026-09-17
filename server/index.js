@@ -12,6 +12,7 @@ const summaryRouter = require('./routes/summary');
 const calendarRouter = require('./routes/calendar');
 const connectionsRouter = require('./routes/connections');
 const integrationsRouter = require('./routes/integrations');
+const scheduleRouter = require('./routes/schedule');
 
 const app = express();
 app.use(express.json());
@@ -25,6 +26,7 @@ app.use('/api/summary', ensureDeviceUser, summaryRouter);
 app.use('/api/calendar', ensureDeviceUser, calendarRouter);
 app.use('/api/connections', ensureDeviceUser, connectionsRouter);
 app.use('/api/integrations', integrationsRouter); // 外部サービスはトークン認証（端末Cookieは使わない）
+app.use('/api/schedule', ensureDeviceUser, scheduleRouter); // スケジュール管理アプリ（APP-4）
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
