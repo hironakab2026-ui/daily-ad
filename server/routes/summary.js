@@ -1,7 +1,43 @@
 const express = require('express');
 const pool = require('../db');
+const { displayNameFor } = require('../services');
 
 const router = express.Router();
+
+// GET /api/summary/connected?date=YYYY-MM-DD
+// 連携中の外部サービスの、その日の要約を返す（連携していないサービスは含めない）。
+router.get('/connected', async (req, res, next) => {
+  try {
+    const { date } = req.query;
+    if (!date) return res.status(400).json({ error: 'date クエリパラメータが必要です' });
+
+    const [rows] = await pool.query(
+      `SELECT c.content_key, s.status, s.grade, s.badge, s.metrics, s.deep_link
+       FROM service_connections c
+       LEFT JOIN content_summary_cache s
+         ON s.user_id = c.user_id AND s.content_key = c.content_key AND s.target_date = ?
+       WHERE c.user_id = ?`,
+      [date, req.userId]
+    );
+    res.json(rows.map((r) => {
+      let metrics = null;
+      if (r.metrics) {
+        metrics = typeof r.metrics === 'string' ? JSON.parse(r.metrics) : r.metrics;
+      }
+      return {
+        content_key: r.content_key,
+        display_name: displayNameFor(r.content_key),
+        status: r.status || 'none',
+        grade: r.grade,
+        badge: r.badge,
+        metrics,
+        deep_link: r.deep_link,
+      };
+    }));
+  } catch (err) {
+    next(err);
+  }
+});
 
 function monthRange(month) {
   // month: 'YYYY-MM' -> 'YYYY-MM-DD'

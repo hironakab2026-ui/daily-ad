@@ -10,6 +10,8 @@ const transactionsRouter = require('./routes/transactions');
 const tasksRouter = require('./routes/tasks');
 const summaryRouter = require('./routes/summary');
 const calendarRouter = require('./routes/calendar');
+const connectionsRouter = require('./routes/connections');
+const integrationsRouter = require('./routes/integrations');
 
 const app = express();
 app.use(express.json());
@@ -30,6 +32,8 @@ app.use('/api/transactions', requireAuth, transactionsRouter);
 app.use('/api/tasks', requireAuth, tasksRouter);
 app.use('/api/summary', requireAuth, summaryRouter);
 app.use('/api/calendar', requireAuth, calendarRouter);
+app.use('/api/connections', requireAuth, connectionsRouter);
+app.use('/api/integrations', integrationsRouter); // 外部サービスはトークン認証（requireAuthは使わない）
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

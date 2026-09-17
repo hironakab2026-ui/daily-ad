@@ -143,11 +143,12 @@ async function render() {
 // ============================================================
 async function renderToday(view) {
   const date = todayFixed;
-  const [summary, txs, tasks, calCells] = await Promise.all([
+  const [summary, txs, tasks, calCells, connected] = await Promise.all([
     api(`/summary/today?date=${date}`),
     api(`/transactions?date=${date}`),
     api(`/tasks/today?date=${date}`),
     api(`/calendar?month=${state.homeMonth}`),
+    api(`/summary/connected?date=${date}`),
   ]);
 
   view.innerHTML = `
@@ -171,6 +172,8 @@ async function renderToday(view) {
         ${tasks.length ? tasks.map(taskRowHtml).join('') : '<div class="empty">この日の予定タスクはありません</div>'}
       </div>
     </div>
+
+    ${connected.map(connectedServiceCardHtml).join('')}
 
     <div class="card">
       <div class="accordion-header ${state.txOpen ? 'open' : ''}" id="tx-accordion-header">
@@ -211,6 +214,7 @@ async function renderToday(view) {
   });
   document.getElementById('add-task-btn').addEventListener('click', () => openTaskDefModal(null, () => renderToday(view)));
   document.getElementById('add-tx-btn').addEventListener('click', () => openTransactionModal(date, () => renderToday(view)));
+  bindServiceLinks(view);
 
   // 収支明細アコーディオン
   document.getElementById('tx-accordion-header').addEventListener('click', () => {
@@ -288,6 +292,38 @@ function taskRowHtml(t) {
   `;
 }
 
+function humanizeKey(key) {
+  const s = String(key).replace(/[_-]+/g, ' ').trim();
+  return s.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// 連携中の外部サービスの要約カード（grade・badge・metrics最大6件のみ。詳細は deep_link へ遷移）
+function connectedServiceCardHtml(s) {
+  const hasData = s.status && s.status !== 'none';
+  const metricsEntries = s.metrics ? Object.entries(s.metrics).slice(0, 6) : [];
+  return `
+    <div class="card">
+      <div class="card-header">
+        <h2>${escapeHtml(s.display_name)}</h2>
+        ${s.grade ? `<span class="btn-labeled" style="background:var(--primary-soft);">${escapeHtml(s.grade)}</span>` : ''}
+      </div>
+      ${s.badge ? `<div style="font-size:12.5px;color:var(--muted);margin-bottom:6px;">${escapeHtml(s.badge)}</div>` : ''}
+      ${hasData && metricsEntries.length ? `
+        <div class="stat-line-grid">
+          ${metricsEntries.map(([k, v]) => `<div class="stat-line"><span>${escapeHtml(humanizeKey(k))}</span><span class="stat-val">${escapeHtml(String(v))}</span></div>`).join('')}
+        </div>
+      ` : `<div class="empty" style="padding:6px 0;">まだこの日の記録はありません</div>`}
+      ${s.deep_link ? `<div style="height:8px;"></div><button class="btn secondary" data-open-link="${escapeHtml(s.deep_link)}">${escapeHtml(s.display_name)}を開く</button>` : ''}
+    </div>
+  `;
+}
+
+function bindServiceLinks(root) {
+  root.querySelectorAll('[data-open-link]').forEach((btn) => {
+    btn.addEventListener('click', () => window.open(btn.dataset.openLink, '_blank', 'noopener'));
+  });
+}
+
 function renderTxList(txs) {
   if (!txs.length) return '<div class="empty">記録がありません</div>';
   return txs.map((t) => `
@@ -313,7 +349,10 @@ function bindTxDelete(root, onDone) {
 }
 
 async function openDayDetailModal(date) {
-  const detail = await api(`/calendar/day/${date}`);
+  const [detail, connected] = await Promise.all([
+    api(`/calendar/day/${date}`),
+    api(`/summary/connected?date=${date}`),
+  ]);
   openModal(`
     <h2>${escapeHtml(fmtDateLabel(date))}の詳細</h2>
     <h3 style="font-size:13px;color:var(--muted);">収支</h3>
@@ -324,10 +363,12 @@ async function openDayDetailModal(date) {
         <div class="task-checkbox ${t.is_done ? 'done' : ''}">${t.is_done ? icon('check', 14) : ''}</div>
         <div class="task-row-info"><div class="task-row-name ${t.is_done ? 'done' : ''}">${escapeHtml(t.name)}</div></div>
       </div>`).join('') : '<div class="empty">予定タスクなし</div>'}</div>
+    ${connected.length ? `<div style="height:16px;"></div>${connected.map(connectedServiceCardHtml).join('')}` : ''}
     <div style="height:12px;"></div>
     <button class="btn secondary" id="detail-add-tx">この日に収支を追加</button>
   `);
   bindTxDelete(document.getElementById('modal-root'), () => openDayDetailModal(date));
+  bindServiceLinks(document.getElementById('modal-root'));
   document.getElementById('detail-add-tx').addEventListener('click', () => openTransactionModal(date, () => { closeModal(); if (state.tab === 'today') render(); }));
 }
 
@@ -722,6 +763,7 @@ async function renderRecords(view) {
 async function renderSettings(view) {
   state.categories = await api('/categories?all=1');
   const defs = await api('/tasks/definitions?all=1');
+  const connections = await api('/connections');
   const expense = state.categories.filter((c) => c.kind === 'expense');
   const income = state.categories.filter((c) => c.kind === 'income');
 
@@ -730,6 +772,13 @@ async function renderSettings(view) {
       <h2>アカウント</h2>
       <div style="font-size:14px;margin-bottom:10px;">${escapeHtml(state.user.display_name)}（${escapeHtml(state.user.email)}）</div>
       <button class="btn secondary" id="logout-btn">ログアウト</button>
+    </div>
+    <div class="card">
+      <h2>外部サービス連携</h2>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">連携すると、要約（評価・指標）がホーム画面などに表示されます。詳細を見るには連携先アプリを開きます。</div>
+      <ul class="settings-list" id="connections-list">
+        ${connections.map(connectionRowHtml).join('')}
+      </ul>
     </div>
     <div class="card">
       <h2>支出カテゴリ</h2>
@@ -762,6 +811,20 @@ async function renderSettings(view) {
     state.user = null;
     showAuthScreen();
   });
+  view.querySelectorAll('[data-connect]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const { token } = await api(`/connections/${btn.dataset.connect}/connect`, { method: 'POST' });
+      openTokenModal(token, () => renderSettings(view));
+    });
+  });
+  view.querySelectorAll('[data-disconnect]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm(`「${btn.dataset.name}」との連携を解除しますか？`)) return;
+      await api(`/connections/${btn.dataset.disconnect}/disconnect`, { method: 'POST' });
+      toast('連携を解除しました');
+      renderSettings(view);
+    });
+  });
   view.querySelectorAll('[data-toggle-cat]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const cat = state.categories.find((c) => c.id === Number(btn.dataset.toggleCat));
@@ -781,6 +844,40 @@ async function renderSettings(view) {
       renderSettings(view);
     });
   });
+}
+
+function connectionRowHtml(s) {
+  return `
+    <li>
+      <span>${escapeHtml(s.display_name)}${s.connected ? '（連携済み）' : ''}</span>
+      ${s.connected
+        ? `<button class="link-row" data-disconnect="${s.content_key}" data-name="${escapeHtml(s.display_name)}" style="background:none;border:none;font-size:13px;">連携を解除</button>`
+        : `<button class="btn-labeled" data-connect="${s.content_key}"><span data-icon="plus" data-icon-size="14"></span>連携する</button>`}
+    </li>
+  `;
+}
+
+function openTokenModal(token, onClose) {
+  openModal(`
+    <h2>連携トークンを発行しました</h2>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px;">このトークンは今だけ表示されます。連携先アプリの設定画面に貼り付けてください。もう一度表示することはできません（再連携すると新しいトークンが発行されます）。</div>
+    <div class="field">
+      <input type="text" id="token-value" value="${escapeHtml(token)}" readonly>
+    </div>
+    <button class="btn secondary" id="token-copy">コピーする</button>
+    <div style="height:8px;"></div>
+    <button class="btn" id="token-done">閉じる</button>
+  `);
+  document.getElementById('token-copy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(token);
+      toast('コピーしました');
+    } catch (e) {
+      document.getElementById('token-value').select();
+      toast('選択状態にしました（手動でコピーしてください）');
+    }
+  });
+  document.getElementById('token-done').addEventListener('click', () => { closeModal(); onClose(); });
 }
 
 function catRowHtml(c) {
