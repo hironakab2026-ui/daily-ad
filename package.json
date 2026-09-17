@@ -1,0 +1,18 @@
+{
+  "name": "life-manager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "生活管理アプリ（APP-1）- 収支管理・タスク管理",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-session": "^1.19.0",
+    "mysql2": "^3.11.0"
+  }
+}

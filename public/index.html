@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>生活管理アプリ</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="auth-screen"></div>
+<div id="app" style="display:none;">
+  <header class="topbar">
+    <h1 id="topbar-title">今日</h1>
+  </header>
+  <main id="view"></main>
+  <button class="fab" id="fab-add" title="収支を入力">＋</button>
+  <nav class="tabbar">
+    <button data-tab="today" class="active"><span class="icon">🏠</span>今日</button>
+    <button data-tab="tasks"><span class="icon">✅</span>タスク</button>
+    <button data-tab="calendar"><span class="icon">📅</span>カレンダー</button>
+    <button data-tab="records"><span class="icon">📋</span>記録</button>
+    <button data-tab="settings"><span class="icon">⚙️</span>設定</button>
+  </nav>
+</div>
+<div id="modal-root"></div>
+<div id="toast" class="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
