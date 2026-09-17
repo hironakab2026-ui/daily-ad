@@ -1,10 +1,10 @@
 require('dotenv').config();
 const path = require('path');
 const express = require('express');
-const session = require('express-session');
+const cookieParser = require('cookie-parser');
 
-const { requireAuth } = require('./middleware/auth');
-const authRouter = require('./routes/auth');
+const { ensureDeviceUser } = require('./middleware/auth');
+const deviceRouter = require('./routes/device');
 const categoriesRouter = require('./routes/categories');
 const transactionsRouter = require('./routes/transactions');
 const tasksRouter = require('./routes/tasks');
@@ -15,25 +15,16 @@ const integrationsRouter = require('./routes/integrations');
 
 const app = express();
 app.use(express.json());
-app.use(session({
-  secret: process.env.SESSION_SECRET,
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    maxAge: 30 * 24 * 60 * 60 * 1000, // 30日
-    httpOnly: true,
-    sameSite: 'lax',
-  },
-}));
+app.use(cookieParser(process.env.SESSION_SECRET));
 
-app.use('/api/auth', authRouter);
-app.use('/api/categories', requireAuth, categoriesRouter);
-app.use('/api/transactions', requireAuth, transactionsRouter);
-app.use('/api/tasks', requireAuth, tasksRouter);
-app.use('/api/summary', requireAuth, summaryRouter);
-app.use('/api/calendar', requireAuth, calendarRouter);
-app.use('/api/connections', requireAuth, connectionsRouter);
-app.use('/api/integrations', integrationsRouter); // 外部サービスはトークン認証（requireAuthは使わない）
+app.use('/api/device', ensureDeviceUser, deviceRouter);
+app.use('/api/categories', ensureDeviceUser, categoriesRouter);
+app.use('/api/transactions', ensureDeviceUser, transactionsRouter);
+app.use('/api/tasks', ensureDeviceUser, tasksRouter);
+app.use('/api/summary', ensureDeviceUser, summaryRouter);
+app.use('/api/calendar', ensureDeviceUser, calendarRouter);
+app.use('/api/connections', ensureDeviceUser, connectionsRouter);
+app.use('/api/integrations', integrationsRouter); // 外部サービスはトークン認証（端末Cookieは使わない）
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

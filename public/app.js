@@ -55,11 +55,6 @@ async function api(path, options = {}) {
   });
   let body = null;
   try { body = await res.json(); } catch (e) { /* no body */ }
-  if (res.status === 401 && !path.startsWith('/auth/')) {
-    state.user = null;
-    showAuthScreen();
-    throw new Error('ログインが必要です');
-  }
   if (!res.ok) {
     throw new Error(body?.error || `リクエストに失敗しました (${res.status})`);
   }
@@ -769,9 +764,15 @@ async function renderSettings(view) {
 
   view.innerHTML = `
     <div class="card">
-      <h2>アカウント</h2>
-      <div style="font-size:14px;margin-bottom:10px;">${escapeHtml(state.user.display_name)}（${escapeHtml(state.user.email)}）</div>
-      <button class="btn secondary" id="logout-btn">ログアウト</button>
+      <h2>この端末</h2>
+      <div class="field">
+        <label>ニックネーム</label>
+        <input type="text" id="device-name" value="${escapeHtml(state.user.display_name)}">
+      </div>
+      <button class="btn secondary" id="device-rename-btn">保存する</button>
+      <div style="height:14px;"></div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">ログインは不要です。この端末（ブラウザ）のデータは自動で区別されています。リセットすると、この端末は次回アクセス時に新規として扱われます（今のデータには戻れなくなります）。</div>
+      <button class="btn secondary" id="device-reset-btn">この端末をリセットする</button>
     </div>
     <div class="card">
       <h2>外部サービス連携</h2>
@@ -806,10 +807,17 @@ async function renderSettings(view) {
   `;
   fillIcons(view);
 
-  document.getElementById('logout-btn').addEventListener('click', async () => {
-    await api('/auth/logout', { method: 'POST' });
-    state.user = null;
-    showAuthScreen();
+  document.getElementById('device-rename-btn').addEventListener('click', async () => {
+    const name = document.getElementById('device-name').value.trim();
+    if (!name) return toast('ニックネームを入力してください');
+    await api('/device', { method: 'PATCH', body: JSON.stringify({ display_name: name }) });
+    state.user.display_name = name;
+    toast('保存しました');
+  });
+  document.getElementById('device-reset-btn').addEventListener('click', async () => {
+    if (!confirm('この端末をリセットします。今のデータには次回から戻れなくなります。よろしいですか？')) return;
+    await api('/device/reset', { method: 'POST' });
+    location.reload();
   });
   view.querySelectorAll('[data-connect]').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -910,66 +918,13 @@ function openCategoryModal(kind, onSaved) {
 }
 
 // ============================================================
-// 認証（ログイン／新規登録）
+// 起動（ログイン不要。初回アクセス時にサーバー側が端末を自動登録し、
+// 署名付きCookieで以降のアクセスを識別する）
 // ============================================================
-function showAuthScreen() {
-  document.getElementById('app').style.display = 'none';
-  document.getElementById('auth-screen').style.display = 'flex';
-  renderAuthScreen('login');
-}
-
-function showApp() {
-  document.getElementById('auth-screen').style.display = 'none';
-  document.getElementById('app').style.display = 'block';
-}
-
-function renderAuthScreen(mode, errorMsg) {
-  const root = document.getElementById('auth-screen');
-  const isLogin = mode === 'login';
-  root.innerHTML = `
-    <div class="auth-card">
-      <h1>生活管理アプリ</h1>
-      <div class="subtitle">${isLogin ? 'ログイン' : '新規登録'}</div>
-      ${errorMsg ? `<div class="auth-error">${escapeHtml(errorMsg)}</div>` : ''}
-      <form id="auth-form">
-        ${!isLogin ? `<div class="field"><label>お名前</label><input type="text" id="auth-name" required></div>` : ''}
-        <div class="field"><label>メールアドレス</label><input type="email" id="auth-email" required></div>
-        <div class="field"><label>パスワード（8文字以上）</label><input type="password" id="auth-password" minlength="8" required></div>
-        <button type="submit" class="btn">${isLogin ? 'ログイン' : '登録する'}</button>
-      </form>
-      <div class="auth-switch">
-        ${isLogin ? 'アカウントをお持ちでない方は <a id="auth-switch-link">新規登録</a>' : 'すでにアカウントをお持ちの方は <a id="auth-switch-link">ログイン</a>'}
-      </div>
-    </div>
-  `;
-  document.getElementById('auth-switch-link').addEventListener('click', () => renderAuthScreen(isLogin ? 'register' : 'login'));
-  document.getElementById('auth-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const email = document.getElementById('auth-email').value.trim();
-    const password = document.getElementById('auth-password').value;
-    try {
-      const user = isLogin
-        ? await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) })
-        : await api('/auth/register', { method: 'POST', body: JSON.stringify({ email, password, display_name: document.getElementById('auth-name').value.trim() }) });
-      state.user = user;
-      state.categories = [];
-      showApp();
-      setTab('today');
-    } catch (err) {
-      renderAuthScreen(mode, err.message);
-    }
-  });
-}
-
 async function boot() {
   fillIcons(document);
-  try {
-    state.user = await api('/auth/me');
-    showApp();
-    setTab('today');
-  } catch (err) {
-    showAuthScreen();
-  }
+  state.user = await api('/device');
+  setTab('today');
 }
 
 // ============================================================

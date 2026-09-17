@@ -2,6 +2,8 @@
 
 収支管理・タスク管理を行う個人向け生活管理システムのハブアプリです。詳細な要件・設計方針は [CLAUDE.md](./CLAUDE.md) を参照してください。
 
+**ログインはありません。** 初回アクセス時にサーバーが端末（ブラウザ）ごとに自動でユーザーを作成し、署名付きCookieで識別します（詳しくは `server/middleware/auth.js`）。Cookieを消す・別ブラウザ／別端末でアクセスすると別のデータになります。
+
 ## セットアップ
 
 ### 前提
@@ -19,7 +21,7 @@
 
 2. 環境変数を設定
 
-   `.env.example` を `.env` にコピーし、DB接続情報などを環境に合わせて変更してください。
+   `.env.example` を `.env` にコピーし、DB接続情報などを環境に合わせて変更してください。`SESSION_SECRET` は端末Cookieの署名に使うので、他人に推測されない値にしてください。
 
    ```bash
    cp .env.example .env
@@ -33,15 +35,10 @@
    mysql -u root -p life_manager < db/01_schema.sql
    mysql -u root -p life_manager < db/02_seed.sql
    mysql -u root -p life_manager < db/04_multiuser.sql
+   mysql -u root -p life_manager < db/05_service_connections.sql
    ```
 
-4. デモユーザーを作成（任意）
-
-   ```bash
-   node server/scripts/create_demo_user.js [email] [password] [表示名]
-   ```
-
-5. サーバーを起動
+4. サーバーを起動
 
    ```bash
    npm start
@@ -49,16 +46,15 @@
 
    開発時はファイル変更を監視する `npm run dev` が使えます。
 
-   起動後 `http://localhost:3000`（`.env` の `PORT` に従う）でアプリにアクセスできます。
+   起動後 `http://localhost:3000`（`.env` の `PORT` に従う）でアプリにアクセスできます。初回アクセスで自動的に新しい端末として登録されます。
 
 ## API
 
 | メソッド | パス | 概要 |
 | --- | --- | --- |
-| POST | `/api/auth/register` | 新規登録 |
-| POST | `/api/auth/login` | ログイン |
-| POST | `/api/auth/logout` | ログアウト |
-| GET | `/api/auth/me` | ログイン中ユーザー情報 |
+| GET | `/api/device` | この端末のプロフィール |
+| PATCH | `/api/device` | ニックネームの変更 |
+| POST | `/api/device/reset` | この端末の紐付けを解除（次回アクセスで新規端末になる） |
 | GET | `/api/categories` | カテゴリ一覧 |
 | POST | `/api/categories` | カテゴリ作成 |
 | PATCH | `/api/categories/:id` | カテゴリ更新 |
@@ -75,10 +71,16 @@
 | GET | `/api/tasks/definitions/:id/streak` | タスクの継続日数 |
 | GET | `/api/summary/today` | 当日サマリー |
 | GET | `/api/summary/month` | 月次サマリー |
+| GET | `/api/summary/trend` | 月別の収支・タスク達成率の推移 |
+| GET | `/api/summary/connected` | 連携中の外部サービスの当日の要約 |
 | GET | `/api/calendar` | カレンダー表示用データ |
 | GET | `/api/calendar/day/:date` | 日別詳細データ |
+| GET | `/api/connections` | 連携可能なサービス一覧・連携状況 |
+| POST | `/api/connections/:contentKey/connect` | 連携トークンを発行 |
+| POST | `/api/connections/:contentKey/disconnect` | 連携を解除 |
+| POST | `/api/integrations/summary` | （外部サービス用・トークン認証）その日の要約をpush |
 
-`/api/auth/*` 以外はログイン必須です（`server/middleware/auth.js`）。
+`/api/integrations/*` 以外は端末Cookie必須です（`server/middleware/auth.js`、ログイン画面はなし）。`/api/integrations/*` は `Authorization: Bearer <トークン>` で認証します（詳細は [00_システム全体構成・連携仕様.md](./00_システム全体構成・連携仕様.md)）。
 
 ## ディレクトリ構成
 

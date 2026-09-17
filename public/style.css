@@ -445,28 +445,6 @@ input[type="text"], input[type="email"], input[type="password"], input[type="dat
 .link-row { color: var(--primary); cursor: pointer; }
 .danger-zone { border-top: 1px solid var(--border); margin-top: 20px; padding-top: 12px; }
 
-/* ---------- 認証画面 ---------- */
-#auth-screen {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px 16px;
-}
-.auth-card {
-  width: 100%;
-  max-width: 360px;
-  background: var(--card);
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  padding: 28px 22px;
-}
-.auth-card h1 { font-size: 20px; margin: 0 0 4px; text-align: center; }
-.auth-card .subtitle { text-align: center; color: var(--muted); font-size: 13px; margin-bottom: 20px; }
-.auth-error { background: #fdeceb; color: var(--expense); font-size: 13px; padding: 8px 12px; border-radius: 8px; margin-bottom: 12px; }
-.auth-switch { text-align: center; font-size: 13px; color: var(--muted); margin-top: 16px; }
-.auth-switch a { color: var(--primary); cursor: pointer; text-decoration: none; }
-
 /* ---------- タスク一覧タブ ---------- */
 .task-def-row {
   display: flex;

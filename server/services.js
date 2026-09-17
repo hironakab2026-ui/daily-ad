@@ -12,4 +12,19 @@ function displayNameFor(key) {
   return AVAILABLE_SERVICES.find((s) => s.content_key === key)?.display_name || key;
 }
 
-module.exports = { AVAILABLE_SERVICES, isValidContentKey, displayNameFor };
+// 新しい端末（ユーザー）を作成したときに用意する初期カテゴリ
+const DEFAULT_CATEGORIES = [
+  ['expense', '食費', 1],
+  ['expense', '日用品', 2],
+  ['expense', '交通費', 3],
+  ['expense', '交際費', 4],
+  ['expense', '娯楽', 5],
+  ['expense', '医療', 6],
+  ['expense', '固定費', 7],
+  ['expense', 'その他', 99],
+  ['income', '給与', 1],
+  ['income', '副収入', 2],
+  ['income', '臨時収入', 3],
+];
+
+module.exports = { AVAILABLE_SERVICES, isValidContentKey, displayNameFor, DEFAULT_CATEGORIES };
