@@ -23,6 +23,8 @@ const ICONS = {
   shoulders: '<circle cx="12" cy="4.6" r="1.8"/><path d="M4 17c0-5.2 3.6-9.4 8-9.4s8 4.2 8 9.4"/><circle cx="4.6" cy="16.8" r="1.7"/><circle cx="19.4" cy="16.8" r="1.7"/>',
   arms: '<path d="M5.2 19.6c-.4-4.4 1.1-7.2 3.7-8.4-1.4-1.8-1.1-4.4.7-5.6 2.1-1.4 4.8 0 4.8 2.3 0 1.5-.9 2.6-2.1 3.2 3 .8 5 3.7 4.8 8.5"/><path d="M9 11.6c1 .5 2.3.5 3.4 0"/>',
   abs: '<rect x="7.4" y="4.6" width="9.2" height="14.8" rx="3.6"/><path d="M7.6 9.2h8.8M7.6 14h8.8M12 4.6v14.8"/>',
+  cardio: '<path d="M3.5 13h3.2l2-4.5 3 8 2.3-6.5 1.7 3h4.8"/><path d="M12 19.5c-3.8-2.6-7.5-5.4-7.5-9.2 0-2.6 2-4.3 4.2-4.3 1.5 0 2.7.8 3.3 2 .6-1.2 1.8-2 3.3-2 2.2 0 4.2 1.7 4.2 4.3 0 3.8-3.7 6.6-7.5 9.2Z"/>',
+  off: '<path d="M20 14.2A8.2 8.2 0 1 1 9.8 4a6.4 6.4 0 0 0 10.2 10.2Z"/>',
 };
 
 function icon(name, size = 20) {
@@ -30,7 +32,10 @@ function icon(name, size = 20) {
   return `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 }
 
-const BODY_PART_ICON = { '胸': 'chest', '背中': 'back', '脚': 'legs', '肩': 'shoulders', '腕': 'arms', '腹': 'abs' };
+const BODY_PART_ICON = {
+  '胸': 'chest', '背中': 'back', '脚': 'legs', '肩': 'shoulders', '腕': 'arms', '腹': 'abs',
+  '有酸素': 'cardio', 'OFF': 'off',
+};
 
 function bodyPartIconName(bodyPart) {
   return BODY_PART_ICON[bodyPart] || 'dumbbell';

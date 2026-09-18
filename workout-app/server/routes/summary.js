@@ -46,25 +46,55 @@ router.get('/history', async (req, res, next) => {
   }
 });
 
-// GET /api/summary/calendar?month=YYYY-MM  -- 履歴・評価（A3-04）のカレンダー表示
+// GET /api/summary/calendar?month=YYYY-MM  -- 記録タブのカレンダー（実績＋分割メニュー予定）
 router.get('/calendar', async (req, res, next) => {
   try {
     const { month } = req.query;
     if (!month || !/^\d{4}-\d{2}$/.test(month)) {
       return res.status(400).json({ error: 'month は YYYY-MM 形式で指定してください' });
     }
-    const [rows] = await pool.query(
+    const monthStart = `${month}-01`;
+    const [actualRows] = await pool.query(
       `SELECT log_date, sets, volume_kg, exercise_count
        FROM v_daily_workout
        WHERE user_id = ? AND log_date BETWEEN ? AND LAST_DAY(?)`,
-      [req.userId, `${month}-01`, `${month}-01`]
+      [req.userId, monthStart, monthStart]
     );
-    res.json(rows.map((r) => ({
-      log_date: r.log_date,
-      sets: Number(r.sets),
-      volume_kg: Number(r.volume_kg),
-      exercise_count: Number(r.exercise_count),
-    })));
+    const [bodyPartRows] = await pool.query(
+      `SELECT l.log_date, e.body_part, COUNT(*) AS n
+       FROM workout_logs l JOIN exercises e ON e.id = l.exercise_id
+       WHERE l.user_id = ? AND l.deleted_at IS NULL AND l.log_date BETWEEN ? AND LAST_DAY(?)
+       GROUP BY l.log_date, e.body_part`,
+      [req.userId, monthStart, monthStart]
+    );
+    const [planRows] = await pool.query(
+      'SELECT plan_date, category FROM training_plans WHERE user_id = ? AND plan_date BETWEEN ? AND LAST_DAY(?)',
+      [req.userId, monthStart, monthStart]
+    );
+
+    // その日いちばん多くセットをこなした部位を「その日の代表部位」としてカレンダーに表示する
+    const dominantByDate = {};
+    bodyPartRows.forEach((r) => {
+      const cur = dominantByDate[r.log_date];
+      if (!cur || r.n > cur.n) dominantByDate[r.log_date] = r.body_part;
+    });
+    const actualByDate = Object.fromEntries(actualRows.map((r) => [r.log_date, r]));
+    const planByDate = Object.fromEntries(planRows.map((r) => [r.plan_date, r.category]));
+
+    // 実績・予定のどちらか片方しかない日も含め、両方のキーの和集合で返す
+    const allDates = new Set([...Object.keys(actualByDate), ...Object.keys(planByDate)]);
+    const result = [...allDates].sort().map((date) => {
+      const a = actualByDate[date];
+      return {
+        log_date: date,
+        sets: a ? Number(a.sets) : 0,
+        volume_kg: a ? Number(a.volume_kg) : 0,
+        exercise_count: a ? Number(a.exercise_count) : 0,
+        dominant_body_part: dominantByDate[date] || null,
+        plan_category: planByDate[date] || null,
+      };
+    });
+    res.json(result);
   } catch (err) {
     next(err);
   }

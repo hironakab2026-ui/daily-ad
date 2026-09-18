@@ -8,24 +8,55 @@
 | --- | --- |
 | 記録の粒度 | セット単位（`workout_logs` の1行＝1セット） |
 | 評価（grade）の算出方法 | 直近7日間のトレーニング日数によるS/A/B/C（`server/lib/grade.js`） |
-| 種目マスタ | ユーザーごと（ハブの `categories` と同じ設計） |
+| 種目マスタ | ユーザーごと（新規ユーザー作成時に定番15種目を自動投入。`server/lib/defaultExercises.js`） |
 | 同期のタイミング | 記録の作成・削除の都度、同期的にハブへ送信（バッチではない） |
+| 認証方式 | ハブと同じ「端末Cookie自動識別」（2026-09-18〜。詳細は下記） |
 
 これらは学習目的の暫定判断です。見直したい場合は `03_要件定義書_運動管理アプリ.md` を更新のうえ、実装を調整してください。
+
+## 画面構成
+
+タブは5つ。「記録」と「履歴」で機能が重複していたため、2026-09-18にカレンダー中心の「記録」＋グラフ中心の「サマリー」に整理した。
+
+| タブ | 内容 |
+| --- | --- |
+| 今日 | 当日のグレード・指標・記録一覧＋クイック追加（A3-01） |
+| 記録 | 月間カレンダー。実施済みの日は塗りつぶし＋トレーニングした部位のアイコン、予定だけの日は点線の輪郭＋予定部門のアイコンで表示。日付タップで「予定（部門）の設定」と「その日の記録の閲覧・追加・削除」を1つのモーダルで行う |
+| 種目 | 種目マスタ管理（A3-03） |
+| サマリー | 期間（2週間/1か月/2か月）別のボリューム・セット数・推定消費カロリーの推移グラフ |
+| 設定 | 端末情報・消費カロリー計算用の体重・ハブ連携 |
+
+### 分割メニューの予定（training_plans）
+
+カレンダーの日付をタップすると、胸・背中・脚・肩・腕・腹・有酸素・OFF の8カテゴリから「その日の予定」をチップで選べる（`training_plans` テーブル、1日1件）。実績（`workout_logs`）が記録された日は、予定より実績の表示を優先する。選択中のカテゴリを再タップすると予定を取り消せる。
+
+## 認証：ハブと同じ「端末Cookie自動識別」
+
+2026-09-17にハブ（APP-1）側が「メール/パスワードログイン」を廃止し、署名付きCookie（`device_id`）でユーザーを自動識別する方式に変更された（コミット `592ca5a`）。このアプリも同じ方式に合わせている。
+
+- ログイン画面はない。初回アクセス時に `users` 行が自動作成される。
+- Cookieの署名は**ハブの `.env` の `SESSION_SECRET` と同じ値**を使う（`workout-app/.env` の `SESSION_SECRET`）。Cookie自体はホスト名にのみ紐づきポートを区別しないブラウザの仕様上、ハブ（`:3000`）とこのアプリ（`:3100`）を同じブラウザで開くと自動的に同じ端末として識別される。
+- ニックネームの変更・端末のリセットはハブ側の設定画面でのみ行う（このアプリの「設定」タブは読み取り専用）。
+- 新規ユーザー作成時、このアプリは定番種目15件（`server/lib/defaultExercises.js`）を自動投入する。ハブ側の初期カテゴリ投入とは独立しているため、**このアプリを先に開いて端末登録した場合、あとでハブを開いてもカテゴリは自動投入されない**（逆に、ハブを先に開いた場合はこのアプリの種目も自動投入されない）。学習目的の既知の制限。
 
 ## アーキテクチャ上の位置づけ
 
 - ハブ（APP-1）とは**別アプリ**（別ポート・別コードベース）として動作します。本アプリのコードを APP-1 の `server/` `public/` に混在させません（`CLAUDE.md` 4.1 の「ハブは他コンテンツの詳細を描画・編集しない」という制約を、アドオン側から見ても守るため）。
-- `00_システム全体構成・連携仕様.md` の推奨方針に従い、**APP-1 と同じ MariaDB インスタンス・同じ `life_manager` データベース・同じ `users` テーブル**を共有します（認証を一本化するため）。このアプリは `exercises` / `workout_logs` / `workout_hub_connections` の3テーブルのみを追加します。
-- ログインは APP-1 で作成したアカウントで行います（このアプリに新規登録機能はありません）。
+- `00_システム全体構成・連携仕様.md` の推奨方針に従い、**APP-1 と同じ MariaDB インスタンス・同じ `life_manager` データベース・同じ `users` テーブル**を共有します（認証を一本化するため）。このアプリは `exercises` / `workout_logs` / `workout_hub_connections` / `training_plans` の4テーブルのみを追加します。
 - 記録の保存・削除のたびに、その日の要約（grade・badge・metrics最大6件）を `POST {ハブのURL}/api/integrations/summary` へ送信します。
+
+## 消費カロリー・METs値について
+
+- METs値の出典：「改訂第2版 身体活動のメッツ表 成人版」（医薬基盤・健康・栄養研究所、2024年、Compendium of Physical Activities準拠）。種目ごとの対応関係は `server/lib/defaultExercises.js` のコメントを参照。
+- 消費カロリー(kcal) = メッツ × 体重(kg) × 時間(h)。1セットの実施時間を記録していないため「1セット≒1分」という簡易な仮定をおいている（あくまで目安）。
+- 体重は**この端末のブラウザ（localStorage）にのみ保存**し、サーバー・ハブには送信しない。
 
 ## セットアップ
 
 ### 前提
 
 - Node.js
-- MySQL / MariaDB（APP-1 側の `db/01_schema.sql` `db/02_seed.sql` `db/04_multiuser.sql` `db/05_service_connections.sql` を適用済みであること）
+- MySQL / MariaDB（APP-1 側の `db/01_schema.sql` `db/04_multiuser.sql` `db/05_service_connections.sql` を適用済みであること）
 
 ### 手順
 
@@ -42,13 +73,13 @@
    cp .env.example .env
    ```
 
-   `PORT` は既定で `3100`（APP-1 の `3000` と衝突しないポート）です。
+   `PORT` は既定で `3100`（APP-1 の `3000` と衝突しないポート）です。`SESSION_SECRET` はハブの `.env` と**必ず同じ値**にしてください。
 
 3. このアプリのテーブルを追加
 
    ```bash
    mysql -u root -p life_manager < db/01_schema.sql
-   mysql -u root -p life_manager < db/02_seed.sql   # 任意：デモ用の種目を投入（user_id=1向け）
+   mysql -u root -p life_manager < db/02_seed.sql   # 任意：既存ユーザーへの定番種目バックフィル
    ```
 
 4. サーバーを起動
@@ -57,7 +88,7 @@
    npm start
    ```
 
-   `http://localhost:3100` でアクセスできます。APP-1（`http://localhost:3000`）で作成したアカウントでログインしてください。
+   `http://localhost:3100` でアクセスできます。ログイン不要で、開いた瞬間に端末が自動登録されます。
 
 5. ハブと連携する（任意）
 
@@ -69,9 +100,7 @@
 
 | メソッド | パス | 概要 |
 | --- | --- | --- |
-| POST | `/api/auth/login` | ログイン（アカウントはAPP-1と共通） |
-| POST | `/api/auth/logout` | ログアウト |
-| GET | `/api/auth/me` | ログイン中ユーザー情報 |
+| GET | `/api/device` | この端末のプロフィール（読み取り専用） |
 | GET | `/api/exercises` | 種目一覧（`?all=1`で非表示分も含む） |
 | POST | `/api/exercises` | 種目を追加 |
 | PATCH | `/api/exercises/:id` | 種目を編集・非表示化 |
@@ -79,20 +108,24 @@
 | POST | `/api/workouts` | 記録を1セット追加（保存後、ハブへ自動同期） |
 | DELETE | `/api/workouts/:id` | 記録を論理削除（削除後、ハブへ自動同期） |
 | GET | `/api/summary/today?date=` | 当日サマリー（A3-01） |
-| GET | `/api/summary/history?days=` | 日別のセット数・ボリューム推移（A3-04） |
+| GET | `/api/summary/history?days=` | 日別のセット数・ボリューム推移（サマリータブ） |
+| GET | `/api/summary/calendar?month=` | 月間カレンダー（記録タブ：実績＋予定） |
 | GET | `/api/summary/exercise-trend/:exerciseId` | 種目別の重量推移 |
+| GET | `/api/plans?month=` | その月の分割メニュー予定一覧 |
+| PUT | `/api/plans/:date` | その日の予定（部門）を設定・上書き |
+| DELETE | `/api/plans/:date` | その日の予定を取り消す |
 | GET | `/api/hub/connection` | ハブ連携の状態 |
 | POST | `/api/hub/connection` | ハブ連携のトークンを登録 |
 | DELETE | `/api/hub/connection` | ハブ連携を解除 |
 | POST | `/api/hub/sync` | 今日の要約を手動でハブへ再送 |
 
-`/api/auth/*` 以外はログイン必須です。
+すべてのAPIで端末Cookieによる自動識別が行われます（未認証エラーは発生しません）。
 
 ## ディレクトリ構成
 
 ```
 public/    フロントエンド（静的ファイル）
 server/    Express サーバー・API ルーティング
-  lib/     評価ロジック（grade.js）・ハブ同期処理（hubSync.js）
-db/        このアプリ専用テーブルのスキーマ・初期データ
+  lib/     評価ロジック（grade.js）・ハブ同期処理（hubSync.js）・定番種目（defaultExercises.js）
+db/        このアプリ専用テーブルのスキーマ・初期データ・マイグレーション
 ```

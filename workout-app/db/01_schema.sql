@@ -60,6 +60,20 @@ CREATE TABLE workout_hub_connections (
     CONSTRAINT fk_hc_user FOREIGN KEY (user_id) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
+-- トレーニング予定（部門別の分割メニュー）
+--   カレンダー上で「この日は胸」「この日はOFF」のように事前に組んでおく。
+--   category は自由入力だが、フロントエンドは 胸/背中/脚/肩/腕/腹/有酸素/OFF の
+--   チップ選択を提供する（public/app.js の PLAN_CATEGORIES）。
+CREATE TABLE training_plans (
+    user_id    INT          NOT NULL,
+    plan_date  DATE         NOT NULL,
+    category   VARCHAR(20)  NOT NULL,
+    created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (user_id, plan_date),
+    CONSTRAINT fk_tp_user FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB;
+
 -- 日別集計ビュー（当日サマリー・履歴・ハブ連携の算出で共通利用）
 CREATE OR REPLACE VIEW v_daily_workout AS
 SELECT

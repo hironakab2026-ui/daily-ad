@@ -11,7 +11,6 @@ const state = {
   tab: 'today',
   user: null,
   exercises: [],
-  logDate: todayStr(),
   historyDays: 14,
   calendarMonth: todayStr().slice(0, 7),
 };
@@ -139,7 +138,10 @@ async function ensureExercises() {
 // ------------------------------------------------------------
 // ルーティング / タブ
 // ------------------------------------------------------------
-const TAB_TITLES = { today: '今日', log: '記録', exercises: '種目', history: '履歴', settings: '設定' };
+const TAB_TITLES = { today: '今日', log: '記録', exercises: '種目', summary: 'サマリー', settings: '設定' };
+
+// カレンダー・日別詳細で使う分割メニューの予定カテゴリ
+const PLAN_CATEGORIES = ['胸', '背中', '脚', '肩', '腕', '腹', '有酸素', 'OFF'];
 
 function setTab(tab) {
   state.tab = tab;
@@ -157,7 +159,7 @@ async function render() {
     if (state.tab === 'today') await renderToday(view);
     else if (state.tab === 'log') await renderLog(view);
     else if (state.tab === 'exercises') await renderExercises(view);
-    else if (state.tab === 'history') await renderHistory(view);
+    else if (state.tab === 'summary') await renderSummary(view);
     else if (state.tab === 'settings') await renderSettings(view);
     fillIcons(view);
   } catch (err) {
@@ -240,38 +242,27 @@ function bindSetDelete(root, date, onDone) {
 }
 
 // ============================================================
-// A3-02 トレーニング記録（日付を選んで記録）
+// A3-02 トレーニング記録（カレンダーから日付を選んで記録・予定を管理）
 // ============================================================
 async function renderLog(view) {
-  const date = state.logDate;
-  const sets = await api(`/workouts?date=${date}`);
-  const totalVolume = sets.reduce((sum, s) => sum + Number(s.weight_kg) * Number(s.reps), 0);
+  const calRows = await api(`/summary/calendar?month=${state.calendarMonth}`);
 
   view.innerHTML = `
-    <div class="date-nav">
-      <button data-shift="-1">${icon('chevronLeft', 18)}</button>
-      <div class="date-label">${escapeHtml(fmtDateLabel(date))}${date === todayFixed ? '（今日）' : ''}</div>
-      <button data-shift="1" ${date >= todayFixed ? 'disabled' : ''}>${icon('chevronRight', 18)}</button>
-    </div>
-    <div class="card">
-      <div class="card-header">
-        <h2>${sets.length}セット ・ 合計 ${totalVolume}kg</h2>
-        <button class="btn-labeled" id="add-set-btn"><span data-icon="plus"></span>記録</button>
-      </div>
-      <div id="log-set-list">
-        ${sets.length ? sets.map(setRowHtml).join('') : '<div class="empty">この日の記録はありません</div>'}
-      </div>
+    <div class="card" id="cal-card">${calendarHtml(state.calendarMonth, calRows)}</div>
+    <div class="li-sub" style="padding:0 2px;">
+      塗りつぶし = 実施済み ・ 点線の輪郭 = 予定のみ。日付をタップすると詳細・予定の編集ができます。
     </div>
   `;
 
-  view.querySelectorAll('[data-shift]').forEach((btn) => {
+  document.getElementById('cal-card').querySelectorAll('[data-month-shift]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      state.logDate = addDaysStr(state.logDate, Number(btn.dataset.shift));
+      state.calendarMonth = shiftMonth(state.calendarMonth, Number(btn.dataset.monthShift));
       renderLog(view);
     });
   });
-  document.getElementById('add-set-btn').addEventListener('click', () => openAddSetModal(date, () => renderLog(view)));
-  bindSetDelete(view, date, () => renderLog(view));
+  document.getElementById('cal-card').querySelectorAll('[data-cal-date]').forEach((el) => {
+    el.addEventListener('click', () => openDayDetailModal(el.dataset.calDate, () => renderLog(view)));
+  });
 }
 
 async function openAddSetModal(date, onSaved) {
@@ -439,12 +430,9 @@ function openExerciseModal(exercise, onSaved) {
 // ============================================================
 // A3-04 履歴・評価
 // ============================================================
-async function renderHistory(view) {
+async function renderSummary(view) {
   const days = state.historyDays;
-  const [rows, calRows] = await Promise.all([
-    api(`/summary/history?days=${days}`),
-    api(`/summary/calendar?month=${state.calendarMonth}`),
-  ]);
+  const rows = await api(`/summary/history?days=${days}`);
   const byDate = Object.fromEntries(rows.map((r) => [r.log_date, r]));
   const dates = [];
   for (let i = days - 1; i >= 0; i--) dates.push(addDaysStr(todayFixed, -i));
@@ -457,7 +445,6 @@ async function renderHistory(view) {
   const totalKcal = kcalSeries.reduce((a, b) => a + b, 0);
 
   view.innerHTML = `
-    <div class="card" id="cal-card">${calendarHtml(state.calendarMonth, calRows)}</div>
     <div class="segmented" id="range-seg">
       <button data-range="14" class="${days === 14 ? 'active' : ''}">2週間</button>
       <button data-range="30" class="${days === 30 ? 'active' : ''}">1か月</button>
@@ -484,17 +471,8 @@ async function renderHistory(view) {
   view.querySelectorAll('[data-range]').forEach((btn) => {
     btn.addEventListener('click', () => {
       state.historyDays = Number(btn.dataset.range);
-      renderHistory(view);
+      renderSummary(view);
     });
-  });
-  document.getElementById('cal-card').querySelectorAll('[data-month-shift]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      state.calendarMonth = shiftMonth(state.calendarMonth, Number(btn.dataset.monthShift));
-      renderHistory(view);
-    });
-  });
-  document.getElementById('cal-card').querySelectorAll('[data-cal-date]').forEach((el) => {
-    el.addEventListener('click', () => openDayDetailModal(el.dataset.calDate));
   });
 }
 
@@ -511,10 +489,14 @@ function calendarHtml(month, rows) {
     const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const rec = byDate[dateStr];
     const isToday = dateStr === todayFixed;
+    const hasRecord = rec && rec.sets > 0;
+    const category = hasRecord ? rec.dominant_body_part : rec?.plan_category;
+    const isOff = !hasRecord && rec?.plan_category === 'OFF';
+    const stateClass = hasRecord ? 'has-record' : (rec?.plan_category ? (isOff ? 'plan-only plan-off' : 'plan-only') : '');
     cells += `
-      <div class="cal-cell ${isToday ? 'today' : ''} ${rec ? 'has-record' : ''}" data-cal-date="${dateStr}">
-        ${day}
-        ${rec ? '<span class="cal-dot"></span>' : ''}
+      <div class="cal-cell ${isToday ? 'today' : ''} ${stateClass}" data-cal-date="${dateStr}">
+        <span>${day}</span>
+        ${category ? `<span class="cal-cell-icon">${icon(bodyPartIconName(category), 15)}</span>` : ''}
       </div>`;
   }
   return `
@@ -527,13 +509,28 @@ function calendarHtml(month, rows) {
   `;
 }
 
-async function openDayDetailModal(date) {
-  const [summary, sets] = await Promise.all([
+async function openDayDetailModal(date, onClose) {
+  const [summary, sets, planRows] = await Promise.all([
     api(`/summary/today?date=${date}`),
     api(`/workouts?date=${date}`),
+    api(`/plans?month=${date.slice(0, 7)}`),
   ]);
+  const currentPlan = planRows.find((p) => p.plan_date === date)?.category || null;
+
   openModal(`
     <h2>${escapeHtml(fmtDateLabel(date))}の記録</h2>
+    <div class="field">
+      <label>この日の予定（部門）</label>
+      <div class="exercise-picker" id="plan-picker" style="grid-template-columns:repeat(4, 1fr);">
+        ${PLAN_CATEGORIES.map((cat) => `
+          <div class="exercise-chip ${cat === currentPlan ? 'selected' : ''}" data-plan-cat="${escapeHtml(cat)}">
+            <div class="body-icon sm">${icon(bodyPartIconName(cat), 15)}</div>
+            <div class="chip-name">${escapeHtml(cat)}</div>
+          </div>
+        `).join('')}
+      </div>
+      <div class="li-sub">選択中のカテゴリをもう一度タップすると予定を取り消せます</div>
+    </div>
     <div class="grade-hero">
       ${gradeCircleHtml(summary.grade)}
       <div>
@@ -550,9 +547,25 @@ async function openDayDetailModal(date) {
     <div style="height:10px;"></div>
     <button class="btn secondary" id="day-detail-add">この日に記録を追加</button>
   `);
-  bindSetDelete(document.getElementById('modal-root'), date, () => openDayDetailModal(date));
+
+  function refresh() { openDayDetailModal(date, onClose); if (onClose) onClose(); }
+
+  document.getElementById('plan-picker').querySelectorAll('[data-plan-cat]').forEach((chip) => {
+    chip.addEventListener('click', async () => {
+      const cat = chip.dataset.planCat;
+      if (cat === currentPlan) {
+        await api(`/plans/${date}`, { method: 'DELETE' });
+        toast('予定を取り消しました');
+      } else {
+        await api(`/plans/${date}`, { method: 'PUT', body: JSON.stringify({ category: cat }) });
+        toast('予定を保存しました');
+      }
+      refresh();
+    });
+  });
+  bindSetDelete(document.getElementById('modal-root'), date, refresh);
   document.getElementById('day-detail-add').addEventListener('click', () => {
-    openAddSetModal(date, () => { closeModal(); if (state.tab === 'history') render(); });
+    openAddSetModal(date, () => { closeModal(); if (onClose) onClose(); });
   });
 }
 

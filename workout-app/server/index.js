@@ -9,6 +9,7 @@ const exercisesRouter = require('./routes/exercises');
 const workoutsRouter = require('./routes/workouts');
 const summaryRouter = require('./routes/summary');
 const hubRouter = require('./routes/hub');
+const plansRouter = require('./routes/plans');
 
 const app = express();
 app.use(express.json());
@@ -21,6 +22,7 @@ app.use('/api/exercises', ensureDeviceUser, exercisesRouter);
 app.use('/api/workouts', ensureDeviceUser, workoutsRouter);
 app.use('/api/summary', ensureDeviceUser, summaryRouter);
 app.use('/api/hub', ensureDeviceUser, hubRouter);
+app.use('/api/plans', ensureDeviceUser, plansRouter);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
