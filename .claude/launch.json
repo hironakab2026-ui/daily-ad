@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "life-manager",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["start"],
+      "port": 3000
+    },
+    {
+      "name": "meal-app",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "meal-app", "start"],
+      "port": 3001
+    }
+  ]
+}

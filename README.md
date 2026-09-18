@@ -11,6 +11,22 @@
 - Node.js
 - MySQL / MariaDB（起動済みであること）
 
+  この開発機では Windows サービス「MariaDB」の自動起動・`Start-Service` での再起動が
+  管理者権限エラーで失敗するため、**サービスに頼らず手動で起動する運用**にしている。
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File scripts\start-mariadb.ps1
+  ```
+
+  停止する場合：
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File scripts\stop-mariadb.ps1
+  ```
+
+  この MariaDB インスタンスは他のプロジェクト（`kadai_db` / `makeupdays_db` 等）とも
+  共有されているため、停止する際は他の作業に影響しないか確認すること。
+
 ### 手順
 
 1. 依存パッケージをインストール
@@ -101,4 +117,11 @@
 public/    フロントエンド（静的ファイル）
 server/    Express サーバー・API ルーティング
 db/        スキーマ・初期データ・クエリ集（MySQL/MariaDB）
+meal-app/  食事管理アプリ（APP-2）。別プロジェクトとして同梱。詳細は meal-app/README.md
 ```
+
+## アドオン（APP-2）
+
+[`meal-app/`](./meal-app) に食事管理アプリ（APP-2）を同梱しています。このハブとは別の Node.js プロジェクトですが、
+同じ MariaDB（`life_manager` データベース・`users` テーブル）を共有し、設定画面で発行した認証トークンで
+`content_summary_cache` に要約を書き込みます。セットアップは [`meal-app/README.md`](./meal-app/README.md) を参照してください。
