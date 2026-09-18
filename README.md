@@ -2,6 +2,8 @@
 
 収支管理・タスク管理を行う個人向け生活管理システムのハブアプリです。詳細な要件・設計方針は [CLAUDE.md](./CLAUDE.md) を参照してください。
 
+運動管理アプリ（APP-3）は [`workout-app/`](./workout-app/) に独立したアプリとして実装しています。セットアップは [`workout-app/README.md`](./workout-app/README.md) を参照してください。
+
 ## セットアップ
 
 ### 前提

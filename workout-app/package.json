@@ -1,0 +1,17 @@
+{
+  "name": "workout-manager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "運動管理アプリ（APP-3）- 筋トレの記録・評価（生活管理アプリ APP-1 と連携するアドオン）",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "mysql2": "^3.11.0"
+  }
+}
